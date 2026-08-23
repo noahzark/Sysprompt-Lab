@@ -67,7 +67,7 @@ More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 | 变量 | 含义 |
 |---|---|
 | `LLM_API_BASE` | OpenAI 兼容 API 根地址 |
-| `LLM_API` | 模型 / API id（如 `gpt-4o-mini`、`deepseek-chat`） |
+| `LLM_API_MODEL` | 模型 / API id（如 `gpt-4o-mini`、`deepseek-chat`） |
 | `LLM_API_TOKEN` | 密钥；只写在 `.env`，不要提交 |
 
 ```bash

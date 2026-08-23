@@ -12,13 +12,13 @@ import {
   readLlmConfig,
 } from "../src/env.js";
 
-const KEYS = ["LLM_API_BASE", "LLM_API", "LLM_API_TOKEN"] as const;
+const KEYS = ["LLM_API_BASE", "LLM_API_MODEL", "LLM_API_TOKEN"] as const;
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function snapshotEnv(): Record<(typeof KEYS)[number], string | undefined> {
   return {
     LLM_API_BASE: process.env.LLM_API_BASE,
-    LLM_API: process.env.LLM_API,
+    LLM_API_MODEL: process.env.LLM_API_MODEL,
     LLM_API_TOKEN: process.env.LLM_API_TOKEN,
   };
 }
@@ -55,13 +55,13 @@ describe(".env.example", () => {
 });
 
 describe("getLlmConfig", () => {
-  it("reads LLM_API_BASE / LLM_API / LLM_API_TOKEN from env", () => {
+  it("reads LLM_API_BASE / LLM_API_MODEL / LLM_API_TOKEN from env", () => {
     process.env.LLM_API_BASE = "https://api.example.com/v1/";
-    process.env.LLM_API = "gpt-4o-mini";
+    process.env.LLM_API_MODEL = "gpt-4o-mini";
     process.env.LLM_API_TOKEN = "sk-test-token";
     expect(getLlmConfig()).toEqual({
       apiBase: "https://api.example.com/v1",
-      api: "gpt-4o-mini",
+      model: "gpt-4o-mini",
       token: "sk-test-token",
     });
   });
@@ -69,7 +69,7 @@ describe("getLlmConfig", () => {
   it("throws a clear error when any required var is missing", () => {
     clearLlmEnv();
     process.env.LLM_API_BASE = "https://api.openai.com/v1";
-    process.env.LLM_API = "gpt-4o-mini";
+    process.env.LLM_API_MODEL = "gpt-4o-mini";
     expect(() => getLlmConfig()).toThrow(/LLM_API_TOKEN/);
     expect(() => getLlmConfig()).toThrow(/\.env\.example/);
   });
@@ -83,7 +83,7 @@ describe("readLlmConfig", () => {
 
   it("returns null when only some vars are set", () => {
     clearLlmEnv();
-    process.env.LLM_API = "gpt-4o-mini";
+    process.env.LLM_API_MODEL = "gpt-4o-mini";
     expect(readLlmConfig()).toBeNull();
   });
 });
@@ -95,18 +95,18 @@ describe("loadEnvFiles", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-env-root-"));
     writeFileSync(
       join(cwd, ".env"),
-      "LLM_API_BASE=https://from-cwd.example/v1\nLLM_API=cwd-model\nLLM_API_TOKEN=cwd-token\n",
+      "LLM_API_BASE=https://from-cwd.example/v1\nLLM_API_MODEL=cwd-model\nLLM_API_TOKEN=cwd-token\n",
     );
     writeFileSync(
       join(root, ".env"),
-      "LLM_API_BASE=https://from-root.example/v1\nLLM_API=root-model\nLLM_API_TOKEN=root-token\n",
+      "LLM_API_BASE=https://from-root.example/v1\nLLM_API_MODEL=root-model\nLLM_API_TOKEN=root-token\n",
     );
 
     const loaded = loadEnvFiles({ cwd, root });
     expect(loaded).toHaveLength(2);
     expect(getLlmConfig()).toEqual({
       apiBase: "https://from-cwd.example/v1",
-      api: "cwd-model",
+      model: "cwd-model",
       token: "cwd-token",
     });
   });
@@ -117,10 +117,10 @@ describe("loadEnvFiles", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-env-only-root-"));
     writeFileSync(
       join(root, ".env"),
-      "LLM_API_BASE=https://root-only.example/v1\nLLM_API=root-only\nLLM_API_TOKEN=root-secret\n",
+      "LLM_API_BASE=https://root-only.example/v1\nLLM_API_MODEL=root-only\nLLM_API_TOKEN=root-secret\n",
     );
     loadEnvFiles({ cwd, root });
-    expect(getLlmConfig().api).toBe("root-only");
+    expect(getLlmConfig().model).toBe("root-only");
   });
 });
 
@@ -130,14 +130,14 @@ describe("maskToken / peekRootFlag", () => {
     expect(
       formatLlmTarget({
         apiBase: "https://api.openai.com/v1",
-        api: "gpt-4o-mini",
+        model: "gpt-4o-mini",
         token: "sk-secret-value",
       }),
     ).toContain("gpt-4o-mini @ https://api.openai.com/v1");
     expect(
       formatLlmTarget({
         apiBase: "https://api.openai.com/v1",
-        api: "gpt-4o-mini",
+        model: "gpt-4o-mini",
         token: "sk-secret-value",
       }),
     ).not.toContain("sk-secret-value");

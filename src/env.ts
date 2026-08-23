@@ -2,11 +2,11 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { config as loadDotenv } from "dotenv";
 
-export const LLM_ENV_KEYS = ["LLM_API_BASE", "LLM_API", "LLM_API_TOKEN"] as const;
+export const LLM_ENV_KEYS = ["LLM_API_BASE", "LLM_API_MODEL", "LLM_API_TOKEN"] as const;
 
 export interface LlmConfig {
   apiBase: string;
-  api: string;
+  model: string;
   token: string;
 }
 
@@ -47,30 +47,30 @@ function stripTrailingSlash(url: string): string {
 
 export function readLlmConfig(): LlmConfig | null {
   const apiBase = readVar("LLM_API_BASE");
-  const api = readVar("LLM_API");
+  const model = readVar("LLM_API_MODEL");
   const token = readVar("LLM_API_TOKEN");
-  if (!apiBase && !api && !token) {
+  if (!apiBase && !model && !token) {
     return null;
   }
-  if (!apiBase || !api || !token) {
+  if (!apiBase || !model || !token) {
     return null;
   }
-  return { apiBase: stripTrailingSlash(apiBase), api, token };
+  return { apiBase: stripTrailingSlash(apiBase), model, token };
 }
 
 /** Required LLM settings. Throws if any of the three vars are missing. */
 export function getLlmConfig(): LlmConfig {
   const apiBase = readVar("LLM_API_BASE");
-  const api = readVar("LLM_API");
+  const model = readVar("LLM_API_MODEL");
   const token = readVar("LLM_API_TOKEN");
-  const missing = LLM_ENV_KEYS.filter((key, i) => ![apiBase, api, token][i]);
+  const missing = LLM_ENV_KEYS.filter((key, i) => ![apiBase, model, token][i]);
   if (missing.length > 0) {
     throw new Error(
       `缺少 LLM 配置：${missing.join(", ")}。请复制 .env.example 为 .env 并填写。\n` +
         `Missing LLM config: ${missing.join(", ")}. Copy .env.example to .env and fill in the values.`,
     );
   }
-  return { apiBase: stripTrailingSlash(apiBase!), api: api!, token: token! };
+  return { apiBase: stripTrailingSlash(apiBase!), model: model!, token: token! };
 }
 
 export function maskToken(token: string): string {
@@ -81,7 +81,7 @@ export function maskToken(token: string): string {
 }
 
 export function formatLlmTarget(config: LlmConfig): string {
-  return `${config.api} @ ${config.apiBase} (token ${maskToken(config.token)})`;
+  return `${config.model} @ ${config.apiBase} (token ${maskToken(config.token)})`;
 }
 
 /** Peek `--root` from argv so `.env` can load before Commander parses. */

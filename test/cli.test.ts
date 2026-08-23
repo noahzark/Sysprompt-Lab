@@ -113,7 +113,7 @@ describe("Phase 1 R0 stub", () => {
     const token = "sk-super-secret-token";
     const out = runCli(root, ["run", "support-bot", "--rung", "R0"], {
       LLM_API_BASE: "https://api.openai.com/v1",
-      LLM_API: "gpt-4o-mini",
+      LLM_API_MODEL: "gpt-4o-mini",
       LLM_API_TOKEN: token,
     });
     expect(out).toMatch(/gpt-4o-mini @ https:\/\/api\.openai\.com\/v1/);
