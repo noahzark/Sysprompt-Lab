@@ -30,7 +30,7 @@ export function loadEnvFiles(options: LoadEnvOptions = {}): string[] {
     if (!existsSync(path)) {
       continue;
     }
-    loadDotenv({ path, override: false });
+    loadDotenv({ path, override: false, quiet: true });
     loaded.push(path);
   }
   return loaded;
