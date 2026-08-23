@@ -73,11 +73,16 @@ export function getLlmConfig(): LlmConfig {
   return { apiBase: stripTrailingSlash(apiBase!), model: model!, token: token! };
 }
 
+/**
+ * Mask a secret for logs. Never emit the raw token or an `sk-` prefix
+ * (a real key's first three characters are often `sk-`).
+ */
 export function maskToken(token: string): string {
-  if (token.length <= 4) {
+  const trimmed = token.trim();
+  if (trimmed.length <= 4) {
     return "****";
   }
-  return `${token.slice(0, 3)}…${token.slice(-2)}`;
+  return `***…${trimmed.slice(-2)}`;
 }
 
 export function formatLlmTarget(config: LlmConfig): string {

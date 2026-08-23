@@ -11,12 +11,31 @@ const repo = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 const cli = join(repo, "packages", "cli", "src", "cli.ts");
 const example = join(repo, "examples", "support-bot");
 
+/** Full OpenAI-style keys. A masked `***…xx` form is allowed. */
+const FULL_API_KEY = /sk-[a-zA-Z0-9_-]{8,}/;
+
+const CLEAR_LLM_ENV = {
+  LLM_API_BASE: "",
+  LLM_API_MODEL: "",
+  LLM_API_TOKEN: "",
+} as const;
+
+const SAMPLE_LLM_ENV = {
+  LLM_API_BASE: "https://api.openai.com/v1",
+  LLM_API_MODEL: "gpt-4o-mini",
+  LLM_API_TOKEN: "sk-super-secret-token",
+} as const;
+
 function runCli(root: string, args: string[], extraEnv: NodeJS.ProcessEnv = {}): string {
   return execFileSync(process.execPath, ["--import", "tsx", cli, "--root", root, ...args], {
     encoding: "utf8",
     cwd: repo,
     env: { ...process.env, ...extraEnv },
   });
+}
+
+function assertNoFullApiKey(text: string): void {
+  expect(text).not.toMatch(FULL_API_KEY);
 }
 
 describe("library ingest → bind → export", () => {
@@ -106,21 +125,39 @@ describe("Phase 1 R0 stub", () => {
     expect(() => runCli(root, ["run", "support-bot", "--rung", "R1", "--dry-run"])).toThrow(
       /must be bound/,
     );
-    const out = runCli(root, ["run", "support-bot", "--rung", "R0", "--dry-run"]);
+    const out = runCli(root, ["run", "support-bot", "--rung", "R0", "--dry-run"], CLEAR_LLM_ENV);
     expect(out).toMatch(/R0 stub/);
     expect(out).toMatch(/hypothesis=stub/);
-    expect(out).toMatch(/LLM config not set|LLM \(unused in stub\)/);
+    expect(out).toMatch(/LLM config not set/);
+    assertNoFullApiKey(out);
   });
 
   it("CLI R2 --dry-run writes r2.diff without network or Python", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-r2-cli-"));
     runCli(root, ["ingest", example]);
     runCli(root, ["bind", "support-bot", join(example, "suite.yaml")]);
-    const out = runCli(root, ["run", "support-bot", "--rung", "R2", "--dry-run", "--budget", "light"]);
-    expect(out).toMatch(/R2 dry-run/);
-    expect(out).toMatch(/r2\.diff/);
-    expect(out).not.toContain("sk-");
-    expect(out).not.toMatch(/\bGEPA\b.*R0|\bR0\b.*GEPA/);
+    const withoutEnv = runCli(
+      root,
+      ["run", "support-bot", "--rung", "R2", "--dry-run", "--budget", "light"],
+      CLEAR_LLM_ENV,
+    );
+    expect(withoutEnv).toMatch(/R2 dry-run/);
+    expect(withoutEnv).toMatch(/r2\.diff/);
+    expect(withoutEnv).toMatch(/LLM config not set/);
+    assertNoFullApiKey(withoutEnv);
+    expect(withoutEnv).not.toMatch(/\bGEPA\b.*R0|\bR0\b.*GEPA/);
+
+    const withEnv = runCli(
+      root,
+      ["run", "support-bot", "--rung", "R2", "--dry-run", "--budget", "light"],
+      SAMPLE_LLM_ENV,
+    );
+    expect(withEnv).toMatch(/R2 dry-run/);
+    expect(withEnv).toMatch(/LLM \(unused in stub\)/);
+    expect(withEnv).toMatch(/gpt-4o-mini @ https:\/\/api\.openai\.com\/v1/);
+    expect(withEnv).toMatch(/token \*\*\*…en/);
+    assertNoFullApiKey(withEnv);
+    expect(withEnv).not.toContain(SAMPLE_LLM_ENV.LLM_API_TOKEN);
   });
 
   it("CLI R2 live path rejects a missing Python with an install hint", () => {
@@ -129,9 +166,7 @@ describe("Phase 1 R0 stub", () => {
     runCli(root, ["bind", "support-bot", join(example, "suite.yaml")]);
     expect(() =>
       runCli(root, ["run", "support-bot", "--rung", "R2"], {
-        LLM_API_BASE: "https://api.openai.com/v1",
-        LLM_API_MODEL: "gpt-4o-mini",
-        LLM_API_TOKEN: "sk-super-secret-token",
+        ...SAMPLE_LLM_ENV,
         SYSPROMPT_PYTHON: "/no/such/sysprompt-python-r2",
       }),
     ).toThrow(/Python 3\.10\+|pip install -r python\/requirements\.txt/);
@@ -141,46 +176,38 @@ describe("Phase 1 R0 stub", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-r1-cli-"));
     runCli(root, ["ingest", example]);
     runCli(root, ["bind", "support-bot", join(example, "suite.yaml")]);
-    const out = runCli(root, [
-      "run",
-      "support-bot",
-      "--rung",
-      "R1",
-      "--dry-run",
-      "--rounds",
-      "1",
-      "--candidates",
-      "2",
-    ]);
-    expect(out).toMatch(/R1 dry-run/);
-    expect(out).toMatch(/r1\.diff/);
-    expect(out).toMatch(/candidates\.jsonl/);
-    expect(out).not.toContain("sk-");
+    const r1Args = ["run", "support-bot", "--rung", "R1", "--dry-run", "--rounds", "1", "--candidates", "2"];
+    const withoutEnv = runCli(root, r1Args, CLEAR_LLM_ENV);
+    expect(withoutEnv).toMatch(/R1 dry-run/);
+    expect(withoutEnv).toMatch(/r1\.diff/);
+    expect(withoutEnv).toMatch(/candidates\.jsonl/);
+    expect(withoutEnv).toMatch(/LLM config not set/);
+    assertNoFullApiKey(withoutEnv);
+
+    const withEnv = runCli(root, r1Args, SAMPLE_LLM_ENV);
+    expect(withEnv).toMatch(/R1 dry-run/);
+    expect(withEnv).toMatch(/LLM \(unused in stub\)/);
+    expect(withEnv).toMatch(/token \*\*\*…en/);
+    assertNoFullApiKey(withEnv);
+    expect(withEnv).not.toContain(SAMPLE_LLM_ENV.LLM_API_TOKEN);
   });
 
   it("prints masked LLM base/model on --dry-run when env is set, without a network call", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-r0-llm-"));
     runCli(root, ["ingest", example]);
-    const token = "sk-super-secret-token";
-    const out = runCli(root, ["run", "support-bot", "--rung", "R0", "--dry-run"], {
-      LLM_API_BASE: "https://api.openai.com/v1",
-      LLM_API_MODEL: "gpt-4o-mini",
-      LLM_API_TOKEN: token,
-    });
+    const out = runCli(root, ["run", "support-bot", "--rung", "R0", "--dry-run"], SAMPLE_LLM_ENV);
     expect(out).toMatch(/gpt-4o-mini @ https:\/\/api\.openai\.com\/v1/);
-    expect(out).toContain("token sk-…en");
-    expect(out).not.toContain(token);
+    expect(out).toContain("token ***…en");
+    expect(out).not.toContain("sk-");
+    assertNoFullApiKey(out);
+    expect(out).not.toContain(SAMPLE_LLM_ENV.LLM_API_TOKEN);
   });
 
   it("CLI errors clearly when R0 needs the network but env is missing", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-r0-missing-"));
     runCli(root, ["ingest", example]);
     expect(() =>
-      runCli(root, ["run", "support-bot", "--rung", "R0"], {
-        LLM_API_BASE: "",
-        LLM_API_MODEL: "",
-        LLM_API_TOKEN: "",
-      }),
+      runCli(root, ["run", "support-bot", "--rung", "R0"], CLEAR_LLM_ENV),
     ).toThrow(/LLM_API_/);
   });
 });

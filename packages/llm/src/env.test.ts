@@ -127,21 +127,17 @@ describe("loadEnvFiles", () => {
 
 describe("maskToken / peekRootFlag", () => {
   it("masks the token and formats the target line", () => {
-    expect(maskToken("sk-secret-value")).toBe("sk-…ue");
-    expect(
-      formatLlmTarget({
-        apiBase: "https://api.openai.com/v1",
-        model: "gpt-4o-mini",
-        token: "sk-secret-value",
-      }),
-    ).toContain("gpt-4o-mini @ https://api.openai.com/v1");
-    expect(
-      formatLlmTarget({
-        apiBase: "https://api.openai.com/v1",
-        model: "gpt-4o-mini",
-        token: "sk-secret-value",
-      }),
-    ).not.toContain("sk-secret-value");
+    expect(maskToken("sk-secret-value")).toBe("***…ue");
+    expect(maskToken("sk-secret-value")).not.toContain("sk-");
+    const line = formatLlmTarget({
+      apiBase: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+      token: "sk-secret-value",
+    });
+    expect(line).toContain("gpt-4o-mini @ https://api.openai.com/v1");
+    expect(line).toContain("token ***…ue");
+    expect(line).not.toContain("sk-secret-value");
+    expect(line).not.toMatch(/sk-[a-zA-Z0-9_-]{8,}/);
   });
 
   it("peeks --root from argv", () => {
