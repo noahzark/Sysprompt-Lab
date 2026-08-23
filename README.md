@@ -18,7 +18,24 @@
 
 三档共用同一验收门：执行 → 同指标验证（含 hold-out）→ 质量 / $ / 延迟 → 更好才晋升。
 
-分阶段说明见 [docs/plan.md](docs/plan.md)。
+分阶段说明见 [docs/plan.md](docs/plan.md)。给编码代理的稳定约定见 [AGENTS.md](AGENTS.md)。
+
+## Layout
+
+npm workspaces. Public imports use `@sysprompt-lab/<name>` (the root package `sysprompt-lab` re-exports the same surface).
+
+```
+packages/core      Card / suite schemas, .spl I/O
+packages/llm       OpenAI-compatible client + LLM_API_* env
+packages/eval      Score, splits, promote / adopt gate
+packages/rewrite   Full rewrite + patch apply + R0/R1 meta-prompts
+packages/rungs     R0 / R1 / R2 orchestration (R2 calls python/)
+packages/cli       sysprompt / spl bins and commands
+python/            GEPA sidecar (not inside a TS package)
+schemas/           JSON Schema draft-07 sources of truth
+examples/          Ingestable cards (support-bot)
+docs/              Product plan
+```
 
 ## Install
 
@@ -34,7 +51,7 @@ Development CLI (no global install):
 
 ```bash
 npm run sysprompt -- --help
-# aliases: npm run spl -- …    or    npx tsx src/cli.ts …
+# aliases: npm run spl -- …    or    npx tsx packages/cli/src/cli.ts …
 ```
 
 After `npm run build`, the bins are `sysprompt` and `spl` (`npx sysprompt` / `npx spl` from this package).
@@ -63,6 +80,8 @@ npm run sysprompt -- export support-bot
 
 `run --rung R0` calls the configured OpenAI-compatible API, writes a candidate + unified diff under `.spl/runs/<id>/r0.diff`, scores **train** and **val** (if the suite has val cases) with the same metric, and auto-promotes **only** when val mean quality strictly rises. Otherwise the new version stays `promoted=false`. Train-only suites never auto-promote.
 
+On large system prompts (`auto` when length ≥ 1500 characters, or `--rewrite-mode patch`) R0 asks for a **structured patch** (JSON edits or a unified diff) and applies it to the current prompt. Tiny prompts still get a full rewrite. Artifacts include `sections.json` (section map) and `patch.json`.
+
 Live R1 eval-loop (same `.env`). The card must already be bound to a suite:
 
 ```bash
@@ -71,7 +90,7 @@ npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
 npm run sysprompt -- run support-bot --rung R1
 ```
 
-R1 scores the baseline, shows the rewriter train failures + scores + history, proposes a few full-prompt candidates, evals each one on the same suite, and adopts only if the score rises (val first, train as a val-tie break; train-only if the suite has no val cases). After the loop it writes `.spl/runs/<id>/candidates.jsonl`, `scores.json`, and `r1.diff` (baseline → best). Auto-promote happens only if the **final** val (or train if there is no val) strictly beats the original baseline; otherwise the run stays unpromoted and the CLI says so.
+R1 scores the baseline, shows the rewriter train failures + scores + history, and proposes a few candidates. On large prompts (`auto` ≥ 1500 chars, or `--rewrite-mode patch`) those candidates are **patches** — JSON `edits` or a unified diff — not a full rewrite; the rewriter is told to patch only what the failures implicate. Tiny prompts still use a full rewrite. Each candidate is eval'd on the same suite and adopted only if the score rises (val first, train as a val-tie break; train-only if the suite has no val cases). After the loop it writes `.spl/runs/<id>/candidates.jsonl`, `scores.json`, `sections.json`, and `r1.diff` (baseline → best). Auto-promote happens only if the **final** val (or train if there is no val) strictly beats the original baseline; otherwise the run stays unpromoted and the CLI says so.
 
 Live R2 wraps official GEPA (same `.env`, plus optional `LLM_REFLECTION_MODEL`). Install the Python sidecar first (Python 3.10+; this downloads `gepa`):
 
@@ -82,7 +101,7 @@ npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
 npm run sysprompt -- run support-bot --rung R2
 ```
 
-`--rung R2` writes a job (seed prompt + suite cases + metric + API env), runs `python -m sysprompt_gepa` which calls `gepa.optimize`, then writes the best instruction back onto the Card. Artifacts: `.spl/runs/<id>/r2.diff`, `sidecar.json`, `scores.json`, `candidates.jsonl`, `summary.md`. Train mutates, val selects. Auto-promote uses the same gate as R1 (val must strictly beat the original baseline; train-only suites may promote if train rises). `--dry-run` skips Python and writes a stub candidate (what CI uses). `--budget light|medium|heavy` (default `light` = 24 metric calls; `medium` 60; `heavy` 150) or a positive integer. Do not call R0/R1 “GEPA”.
+`--rung R2` writes a job (seed prompt + suite cases + metric + API env), runs `python -m sysprompt_gepa` which calls `gepa.optimize`, then writes the best instruction back onto the Card. Artifacts: `.spl/runs/<id>/r2.diff`, `sidecar.json`, `scores.json`, `candidates.jsonl`, `summary.md`. Train mutates, val selects. Auto-promote uses the same gate as R1 (val must strictly beat the original baseline; train-only suites may promote if train rises). `--dry-run` skips Python and writes a stub candidate (what CI uses). `--budget light|medium|heavy` (default `light` = 24 metric calls; `medium` 60; `heavy` 150) or a positive integer. Do not call R0/R1 “GEPA”. R2 still optimizes the whole instruction via the GEPA sidecar; large-prompt patch mode is R0/R1 only.
 
 Human accept without auto-promote:
 
@@ -96,12 +115,15 @@ Flags:
 
 | Flag | Effect |
 |---|---|
-| `--dry-run` | No LLM / Python GEPA calls. R0 copies the baseline; R1/R2 write stub candidates (used by tests) |
+| `--dry-run` | No LLM / Python GEPA calls. R0/R1 apply a tiny fake patch; R2 writes a stub candidate (used by tests) |
 | `--no-eval` | R0/R1: rewrite only. R2: skip auto-promote after the wrap |
 | `--rounds <n>` | R1 max search rounds (default `3`, or `SYSPROMPT_R1_ROUNDS`) |
 | `--candidates <n>` | R1 candidates per round (default `3`, or `SYSPROMPT_R1_CANDIDATES`) |
 | `--pass-streak <n>` | R1 stop after N consecutive adopts (default `1`, or `SYSPROMPT_R1_PASS_STREAK`) |
 | `--budget <value>` | R1: max candidate evals (int, default `rounds × candidates`). R2: `light` / `medium` / `heavy` or max metric calls (default `light`, or `SYSPROMPT_R2_BUDGET`) |
+| `--rewrite-mode <mode>` | R0/R1: `patch` \| `full` \| `auto` (default `auto`). `auto` uses `patch` when the prompt is ≥ 1500 chars (`SYSPROMPT_PATCH_THRESHOLD`), else `full` |
+| `--max-patch-ratio <n>` | R0/R1: reject a patch that changes more than this fraction of characters (default `0.8` on R0, `0.5` on R1) |
+| `--allow-full-rewrite` / `--no-allow-full-rewrite` | If a patch cannot be applied, retry once, then optionally fall back to a full rewrite. Default: on for R0; off for R1 on large/`patch` prompts |
 
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 
@@ -123,6 +145,8 @@ cp .env.example .env
 
 R1 循环次数也可用环境变量覆盖（命令行 flag 优先）：`SYSPROMPT_R1_ROUNDS`、`SYSPROMPT_R1_CANDIDATES`、`SYSPROMPT_R1_PASS_STREAK`、`SYSPROMPT_R1_BUDGET`。
 
+R0/R1 改写模式：`SYSPROMPT_REWRITE_MODE`（`patch` / `full` / `auto`）、`SYSPROMPT_PATCH_THRESHOLD`（默认 1500 字符）。大提示默认打补丁，避免整段重写被截断。
+
 R2 还可用 `LLM_REFLECTION_MODEL`（缺省与 `LLM_API_MODEL` 相同）、`SYSPROMPT_R2_BUDGET`、`SYSPROMPT_PYTHON`。日志只打码 token，不会打印原文。
 
 ## Library
@@ -131,7 +155,7 @@ R2 还可用 `LLM_REFLECTION_MODEL`（缺省与 `LLM_API_MODEL` 相同）、`SYS
 import { ingest, bind, exportCard, runR0, runR1, runR2, promoteVersion, loadCard, loadSuite } from "sysprompt-lab";
 ```
 
-JSON Schema (draft-07) for every entity lives in [`schemas/`](schemas/). Zod sources in `src/schemas.ts` are the runtime validators and can re-emit those files (`npm run emit-schemas`).
+JSON Schema (draft-07) for every entity lives in [`schemas/`](schemas/). Zod sources in [`packages/core`](packages/core) are the runtime validators and can re-emit those files (`npm run emit-schemas`). Package READMEs document each workspace’s public surface and non-goals.
 
 ## Status
 

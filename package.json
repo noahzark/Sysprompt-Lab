@@ -4,31 +4,36 @@
   "description": "Cross-model system-prompt workbench: ingest → optimize → execute → verify → promote.",
   "license": "MIT",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "sysprompt": "./dist/cli.js",
-    "spl": "./dist/cli.js"
+    "sysprompt": "./packages/cli/src/cli.ts",
+    "spl": "./packages/cli/src/cli.ts"
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
     }
   },
   "files": [
-    "dist",
+    "src",
+    "packages",
     "schemas",
     "python",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "AGENTS.md"
   ],
   "scripts": {
-    "build": "tsc && tsx src/emit-schemas.ts",
-    "emit-schemas": "tsx src/emit-schemas.ts",
-    "sysprompt": "tsx src/cli.ts",
-    "spl": "tsx src/cli.ts",
+    "build": "tsc -b && tsx packages/core/src/emit-schemas.ts",
+    "emit-schemas": "tsx packages/core/src/emit-schemas.ts",
+    "sysprompt": "tsx packages/cli/src/cli.ts",
+    "spl": "tsx packages/cli/src/cli.ts",
     "test": "vitest run",
     "test:python": "python3 -m unittest discover -s python/tests -t python",
     "prepublishOnly": "npm run build"
@@ -43,6 +48,12 @@
     "cli"
   ],
   "dependencies": {
+    "@sysprompt-lab/cli": "*",
+    "@sysprompt-lab/core": "*",
+    "@sysprompt-lab/eval": "*",
+    "@sysprompt-lab/llm": "*",
+    "@sysprompt-lab/rewrite": "*",
+    "@sysprompt-lab/rungs": "*",
     "commander": "^13.1.0",
     "diff": "^7.0.0",
     "dotenv": "^17.4.2",
