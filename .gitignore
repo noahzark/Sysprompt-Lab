@@ -54,6 +54,7 @@ ENV/
 # Node / frontend
 node_modules/
 dist/
+*.tsbuildinfo
 
 # Sysprompt Lab workspace (local cards / runs / exports)
 .spl/

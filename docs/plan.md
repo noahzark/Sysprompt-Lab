@@ -16,6 +16,24 @@ All three rungs share one acceptance gate: execute → verify on the same metric
 
 Do not reimplement GEPA. Do not fork AGPL code.
 
+## Layout
+
+TypeScript is an npm workspace. Dependency direction is `cli → rungs → rewrite | eval | llm | core` (no cycles). JSON Schema stays at repo-root `schemas/`. The GEPA sidecar stays at `python/` and is invoked from `@sysprompt-lab/rungs` — do not bury Python inside a TS package.
+
+| Path | Role |
+|---|---|
+| `packages/core` | Card / suite Zod types, `.spl` I/O, prompt diffs, schema emit |
+| `packages/llm` | `LLM_API_*` env + OpenAI-compatible `chat/completions` |
+| `packages/eval` | Suite run, scoring, train/val, adopt / promote **decisions** |
+| `packages/rewrite` | Full rewrite + section/patch apply + R0/R1 meta-prompts |
+| `packages/rungs` | R0 / R1 / R2 orchestration only (`r0.ts` / `r1.ts` / `r2.ts`) |
+| `packages/cli` | `sysprompt` / `spl` bins, ingest / bind / export / promote / run |
+| `python/` | `python -m sysprompt_gepa` sidecar (stdin/stdout JSON job) |
+| `schemas/` | draft-07 sources of truth |
+| `examples/` | Ingestable cards; `support-bot` must keep working |
+
+See [AGENTS.md](../AGENTS.md) for durable conventions (promote gate, patch-mode defaults, env vars).
+
 ## Phase 0 — Data model and offline CLI
 
 Ship the contracts and a round-trip that needs no network:
@@ -79,7 +97,7 @@ R2 is unchanged: the GEPA sidecar still optimizes the whole instruction. Large-S
 Wrap the official GEPA stack behind the same Card / Suite / Run types. Do not reimplement Pareto / merge / reflective mutation. Do not fork AGPL code.
 
 - User still works with a **literal system prompt** Card + EvalSuite (ingest-first). Internally, Card → one `system_prompt` component for `gepa.optimize`.
-- TypeScript `src/r2.ts` + CLI `--rung R2`: require bound card + train (prefer val), write a temp job dir, spawn `python -m sysprompt_gepa`, read `best_prompt` + scores + lineage, persist `.spl/runs/<id>/r2.diff`, `sidecar.json`, `scores.json`, `summary.md`.
+- TypeScript `@sysprompt-lab/rungs` (`r2.ts`) + CLI `--rung R2`: require bound card + train (prefer val), write a temp job dir, spawn `python -m sysprompt_gepa`, read `best_prompt` + scores + lineage, persist `.spl/runs/<id>/r2.diff`, `sidecar.json`, `scores.json`, `summary.md`.
 - Python sidecar in `python/`: adapter maps suite cases → train/val; metric returns score + synthesized feedback (exact / custom contains). Calls `gepa.optimize`. Student = `LLM_API_MODEL`; optional `LLM_REFLECTION_MODEL` (same fallback).
 - `--budget light|medium|heavy` (default light → 24 / 60 / 150 max metric calls) or a positive integer. `--dry-run` skips Python and writes a stub candidate. `--no-eval` skips auto-promote after the wrap.
 - Auto-promote uses the same helper as R1: val must strictly beat the original baseline (train-only suites may promote if train rises).

@@ -12,7 +12,9 @@ pip install -r python/requirements.txt
 pip install -e python/
 ```
 
-The TypeScript CLI sets `PYTHONPATH` to this directory and runs `python -m sysprompt_gepa --job-dir <dir>`.
+TypeScript R2 orchestration lives in `@sysprompt-lab/rungs` (not in this folder). That package sets `PYTHONPATH` to this directory and runs `python -m sysprompt_gepa --job-dir <dir>`. Override the interpreter with `SYSPROMPT_PYTHON`. `--dry-run` does not spawn Python.
+
+Do not vendor or fork AGPL GEPA/DSPy sources here — wrap `gepa.optimize` only.
 
 ## Offline tests (no `gepa` download)
 

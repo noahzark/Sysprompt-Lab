@@ -18,7 +18,24 @@
 
 三档共用同一验收门：执行 → 同指标验证（含 hold-out）→ 质量 / $ / 延迟 → 更好才晋升。
 
-分阶段说明见 [docs/plan.md](docs/plan.md)。
+分阶段说明见 [docs/plan.md](docs/plan.md)。给编码代理的稳定约定见 [AGENTS.md](AGENTS.md)。
+
+## Layout
+
+npm workspaces. Public imports use `@sysprompt-lab/<name>` (the root package `sysprompt-lab` re-exports the same surface).
+
+```
+packages/core      Card / suite schemas, .spl I/O
+packages/llm       OpenAI-compatible client + LLM_API_* env
+packages/eval      Score, splits, promote / adopt gate
+packages/rewrite   Full rewrite + patch apply + R0/R1 meta-prompts
+packages/rungs     R0 / R1 / R2 orchestration (R2 calls python/)
+packages/cli       sysprompt / spl bins and commands
+python/            GEPA sidecar (not inside a TS package)
+schemas/           JSON Schema draft-07 sources of truth
+examples/          Ingestable cards (support-bot)
+docs/              Product plan
+```
 
 ## Install
 
@@ -34,7 +51,7 @@ Development CLI (no global install):
 
 ```bash
 npm run sysprompt -- --help
-# aliases: npm run spl -- …    or    npx tsx src/cli.ts …
+# aliases: npm run spl -- …    or    npx tsx packages/cli/src/cli.ts …
 ```
 
 After `npm run build`, the bins are `sysprompt` and `spl` (`npx sysprompt` / `npx spl` from this package).
@@ -138,7 +155,7 @@ R2 还可用 `LLM_REFLECTION_MODEL`（缺省与 `LLM_API_MODEL` 相同）、`SYS
 import { ingest, bind, exportCard, runR0, runR1, runR2, promoteVersion, loadCard, loadSuite } from "sysprompt-lab";
 ```
 
-JSON Schema (draft-07) for every entity lives in [`schemas/`](schemas/). Zod sources in `src/schemas.ts` are the runtime validators and can re-emit those files (`npm run emit-schemas`).
+JSON Schema (draft-07) for every entity lives in [`schemas/`](schemas/). Zod sources in [`packages/core`](packages/core) are the runtime validators and can re-emit those files (`npm run emit-schemas`). Package READMEs document each workspace’s public surface and non-goals.
 
 ## Status
 

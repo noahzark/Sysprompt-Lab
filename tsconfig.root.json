@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@sysprompt-lab/core": ["./packages/core/src/index.ts"],
+      "@sysprompt-lab/llm": ["./packages/llm/src/index.ts"],
+      "@sysprompt-lab/eval": ["./packages/eval/src/index.ts"],
+      "@sysprompt-lab/rewrite": ["./packages/rewrite/src/index.ts"],
+      "@sysprompt-lab/rungs": ["./packages/rungs/src/index.ts"],
+      "@sysprompt-lab/cli": ["./packages/cli/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/llm" },
+    { "path": "./packages/eval" },
+    { "path": "./packages/rewrite" },
+    { "path": "./packages/rungs" },
+    { "path": "./packages/cli" }
+  ]
+}

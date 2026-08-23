@@ -6,11 +6,17 @@ export {
   EvalCaseSchema,
   EvalSuiteSchema,
   exportVersion,
+  findRepoRoot,
+  loadCard,
+  loadCardFromFile,
+  loadSuite,
+  loadSuiteFromFile,
   MetricKindSchema,
   MetricSchema,
   ModelSchema,
   namedSchemas,
   normalizeSuite,
+  openWorkspace,
   parseCandidate,
   parseCard,
   parseEvalCase,
@@ -30,7 +36,10 @@ export {
   SplitNameSchema,
   SplitSchema,
   ToolSpecSchema,
-} from "./schemas.js";
+  unifiedPromptDiff,
+  writeCard,
+  writeSuite,
+} from "@sysprompt-lab/core";
 export type {
   Candidate,
   CardStatus,
@@ -47,7 +56,8 @@ export type {
   Split,
   SplitName,
   ToolSpec,
-} from "./schemas.js";
+  Workspace,
+} from "@sysprompt-lab/core";
 export {
   bind,
   exportCard,
@@ -56,7 +66,7 @@ export {
   runR0,
   runR1,
   runR2,
-} from "./commands.js";
+} from "@sysprompt-lab/cli";
 export type {
   BindResult,
   ExportResult,
@@ -68,14 +78,23 @@ export type {
   RunR1Result,
   RunR2Options,
   RunR2Result,
-} from "./commands.js";
-export { chatCompletion, chatCompletionsUrl, normalizeLlmApiBase } from "./llm.js";
-export type { ChatCompletionResult, ChatMessage, FetchFn } from "./llm.js";
-export { parseRewriteResponse, parsePatchResponse, rewriteSystemPrompt, shortHypothesis, stripFences } from "./rewrite.js";
-export { caseUserText, formatScoreTable, scoreCase } from "./eval.js";
-export { adoptDecision, promotionDecision, r1PromotionDecision } from "./promote.js";
-export { parseR1Candidates, parseR1RawCandidates, materializeR1Proposals, dedupeProposals } from "./r1-rewrite.js";
+} from "@sysprompt-lab/cli";
+export { chatCompletion, chatCompletionsUrl, normalizeLlmApiBase } from "@sysprompt-lab/llm";
+export type { ChatCompletionResult, ChatMessage, FetchFn, LlmConfig } from "@sysprompt-lab/llm";
 export {
+  formatLlmTarget,
+  getLlmConfig,
+  loadEnvFiles,
+  maskToken,
+  peekRootFlag,
+  readLlmConfig,
+} from "@sysprompt-lab/llm";
+export {
+  parsePatchResponse,
+  parseRewriteResponse,
+  rewriteSystemPrompt,
+  shortHypothesis,
+  stripFences,
   applyEdits,
   applyUnifiedDiff,
   applyPromptPatch,
@@ -88,27 +107,13 @@ export {
   resolveEffectiveRewriteMode,
   splitSections,
   PatchError,
-} from "./patch.js";
-export type { PatchEdit, PromptSection, RewriteMode } from "./patch.js";
-export { resolveR1Config } from "./r1.js";
-export { parseSidecarResult, resolveR2Budget, resolvePython } from "./r2.js";
-export { sanitizeValue, selectEvidenceCases, formatEvidence } from "./r1-evidence.js";
-export {
-  loadCard,
-  loadCardFromFile,
-  loadSuite,
-  loadSuiteFromFile,
-  openWorkspace,
-  writeCard,
-  writeSuite,
-} from "./workspace.js";
-export { unifiedPromptDiff } from "./diff.js";
-export {
-  formatLlmTarget,
-  getLlmConfig,
-  loadEnvFiles,
-  maskToken,
-  peekRootFlag,
-  readLlmConfig,
-} from "./env.js";
-export type { LlmConfig } from "./env.js";
+  parseR1Candidates,
+  parseR1RawCandidates,
+  materializeR1Proposals,
+  dedupeProposals,
+} from "@sysprompt-lab/rewrite";
+export type { PatchEdit, PromptSection, RewriteMode } from "@sysprompt-lab/rewrite";
+export { caseUserText, formatScoreTable, scoreCase } from "@sysprompt-lab/eval";
+export { adoptDecision, promotionDecision, r1PromotionDecision } from "@sysprompt-lab/eval";
+export { resolveR1Config, parseSidecarResult, resolveR2Budget, resolvePython } from "@sysprompt-lab/rungs";
+export { sanitizeValue, selectEvidenceCases, formatEvidence } from "@sysprompt-lab/rungs";
