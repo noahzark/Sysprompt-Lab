@@ -57,6 +57,10 @@ describe("CLI ingest → bind → export", () => {
     const exportOut = runCli(root, ["export", "support-bot"]);
     expect(exportOut).toMatch(/exported support-bot/);
 
+    const relativeRoot = mkdtempSync(join(tmpdir(), "spl-cli-rel-"));
+    const relativeIngest = runCli(relativeRoot, ["ingest", "examples/support-bot"]);
+    expect(relativeIngest).toMatch(/ingested support-bot \(draft\)/);
+
     const card = parseCard(
       JSON.parse(readFileSync(join(root, ".spl", "cards", "support-bot.json"), "utf8")),
     );
@@ -86,7 +90,7 @@ describe("Phase 1 R0 stub", () => {
     expect(result.run.rung).toBe("R0");
     expect(existsSync(result.diffPath)).toBe(true);
     const diff = readFileSync(result.diffPath, "utf8");
-    expect(diff).toMatch(/^diff --git |^--- /);
+    expect(diff).toMatch(/^(Index: |--- )/);
     const run = parseRun(
       JSON.parse(readFileSync(join(root, ".spl", "runs", result.run.id, "run.json"), "utf8")),
     );

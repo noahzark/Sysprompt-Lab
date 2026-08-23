@@ -48,8 +48,12 @@ export interface RunR0Result {
   diffPath: string;
 }
 
-function resolveIngestDir(inputPath: string, cwd: string): string {
-  const resolved = isAbsolute(inputPath) ? inputPath : resolve(cwd, inputPath);
+function resolveUserPath(inputPath: string): string {
+  return isAbsolute(inputPath) ? inputPath : resolve(process.cwd(), inputPath);
+}
+
+function resolveIngestDir(inputPath: string): string {
+  const resolved = resolveUserPath(inputPath);
   if (!existsSync(resolved)) {
     throw new Error(`Path not found: ${resolved}`);
   }
@@ -71,7 +75,7 @@ function readTools(dir: string): ToolSpec[] {
 
 export function ingest(inputPath: string, options: { root?: string; id?: string } = {}): IngestResult {
   const ws = openWorkspace(options.root);
-  const dir = resolveIngestDir(inputPath, ws.root);
+  const dir = resolveIngestDir(inputPath);
   const systemPath = join(dir, "system.md");
   if (!existsSync(systemPath)) {
     throw new Error(`Expected system.md at ${systemPath}`);
@@ -100,7 +104,7 @@ export function ingest(inputPath: string, options: { root?: string; id?: string 
 export function bind(cardRef: string, suiteFile: string, options: { root?: string } = {}): BindResult {
   const ws = openWorkspace(options.root);
   const card = loadCard(ws, cardRef);
-  const suitePathResolved = isAbsolute(suiteFile) ? suiteFile : resolve(ws.root, suiteFile);
+  const suitePathResolved = resolveUserPath(suiteFile);
   const suite = loadSuiteFromFile(suitePathResolved);
   const storedSuitePath = writeSuite(ws, suite);
   card.suite_id = suite.id;
@@ -116,11 +120,7 @@ export function exportCard(
   const ws = openWorkspace(options.root);
   const card = loadCard(ws, cardRef);
   const version = exportVersion(card);
-  const outDir = options.out
-    ? isAbsolute(options.out)
-      ? options.out
-      : resolve(ws.root, options.out)
-    : join(ws.exportDir, card.id);
+  const outDir = options.out ? resolveUserPath(options.out) : join(ws.exportDir, card.id);
   mkdirSync(outDir, { recursive: true });
   const exported: PromptCard = { ...card, status: "exported" };
   const cardPath = join(outDir, "card.json");
