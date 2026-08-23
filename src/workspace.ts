@@ -6,10 +6,12 @@ import {
   type PromptCard,
   type EvalSuite,
   type Run,
+  type Score,
   normalizeSuite,
   parseCandidate,
   parseCard,
   parseRun,
+  parseScore,
 } from "./schemas.js";
 
 export interface Workspace {
@@ -94,8 +96,8 @@ export function writeRun(
   ws: Workspace,
   run: Run,
   candidates: Candidate[],
-  extra?: { diff?: string },
-): { dir: string; runPath: string; candidatesPath: string; diffPath?: string } {
+  extra?: { diff?: string; scores?: Score[] },
+): { dir: string; runPath: string; candidatesPath: string; diffPath?: string; scoresPath?: string } {
   ensureWorkspace(ws);
   const dir = runDir(ws, run.id);
   mkdirSync(dir, { recursive: true });
@@ -111,7 +113,15 @@ export function writeRun(
     diffPath = join(dir, "r0.diff");
     writeFileSync(diffPath, extra.diff.endsWith("\n") ? extra.diff : `${extra.diff}\n`, "utf8");
   }
-  return { dir, runPath, candidatesPath, diffPath };
+  let scoresPath: string | undefined;
+  if (extra?.scores) {
+    scoresPath = join(dir, "scores.json");
+    writeJson(
+      scoresPath,
+      extra.scores.map((s) => parseScore(s)),
+    );
+  }
+  return { dir, runPath, candidatesPath, diffPath, scoresPath };
 }
 
 export function loadCardFromFile(path: string): PromptCard {

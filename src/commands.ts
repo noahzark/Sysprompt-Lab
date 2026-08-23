@@ -1,13 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { unifiedPromptDiff } from "./diff.js";
 import {
-  type Candidate,
   type PromptCard,
   type PromptVersion,
-  type Run,
   type ToolSpec,
-  baselineVersion,
   exportVersion,
   parseToolSpec,
 } from "./schemas.js";
@@ -19,9 +15,11 @@ import {
   openWorkspace,
   slugify,
   writeCard,
-  writeRun,
   writeSuite,
 } from "./workspace.js";
+import { type RunR0Options, type RunR0Result, runR0 } from "./r0.js";
+
+export type { RunR0Options, RunR0Result };
 
 export interface IngestResult {
   card: PromptCard;
@@ -38,14 +36,6 @@ export interface ExportResult {
   card: PromptCard;
   cardPath: string;
   promptPath: string;
-}
-
-export interface RunR0Result {
-  card: PromptCard;
-  run: Run;
-  candidate: Candidate;
-  version: PromptVersion;
-  diffPath: string;
 }
 
 function resolveUserPath(inputPath: string): string {
@@ -131,41 +121,38 @@ export function exportCard(
   return { card: exported, cardPath, promptPath };
 }
 
-export function runR0(cardRef: string, options: { root?: string } = {}): RunR0Result {
+export { runR0 };
+
+export interface PromoteResult {
+  card: PromptCard;
+  version: PromptVersion;
+  cardPath: string;
+}
+
+/** Mark one version as the only promoted version (human accept). */
+export function promoteVersion(
+  cardRef: string,
+  versionId?: string,
+  options: { root?: string } = {},
+): PromoteResult {
   const ws = openWorkspace(options.root);
   const card = loadCard(ws, cardRef);
-  const baseline = baselineVersion(card);
-  const version: PromptVersion = {
-    id: newId("ver"),
-    system_prompt: baseline.system_prompt,
-    hypothesis: "stub",
-    is_baseline: false,
-    promoted: false,
-    parent: baseline.id,
-  };
-  const candidate: Candidate = {
-    id: newId("cand"),
-    round: 0,
-    pass_streak: 0,
-    status: "stub",
-    version_id: version.id,
-  };
-  const run: Run = {
-    id: newId("run"),
-    card_id: card.id,
-    rung: "R0",
-    status: "completed",
-  };
-  card.versions.push(version);
-  card.rung = "R0";
-  card.status = "optimizing";
-  writeCard(ws, card);
-  const diff = unifiedPromptDiff(baseline.system_prompt, version.system_prompt);
-  const written = writeRun(ws, run, [candidate], { diff });
-  if (!written.diffPath) {
-    throw new Error("R0 stub failed to write a unified diff");
+  const version = versionId
+    ? card.versions.find((v) => v.id === versionId)
+    : [...card.versions].reverse().find((v) => !v.is_baseline) ?? card.versions.at(-1);
+  if (!version) {
+    throw new Error(
+      versionId
+        ? `Card "${card.id}" has no version "${versionId}"`
+        : `Card "${card.id}" has no versions to promote`,
+    );
   }
-  return { card, run, candidate, version, diffPath: written.diffPath };
+  for (const item of card.versions) {
+    item.promoted = item.id === version.id;
+  }
+  card.status = "promoted";
+  const cardPath = writeCard(ws, card);
+  return { card, version, cardPath };
 }
 
 export function workspaceAt(root?: string): Workspace {

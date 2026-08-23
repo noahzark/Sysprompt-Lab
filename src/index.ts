@@ -52,14 +52,22 @@ export {
   bind,
   exportCard,
   ingest,
+  promoteVersion,
   runR0,
 } from "./commands.js";
 export type {
   BindResult,
   ExportResult,
   IngestResult,
+  PromoteResult,
+  RunR0Options,
   RunR0Result,
 } from "./commands.js";
+export { chatCompletion, chatCompletionsUrl, normalizeLlmApiBase } from "./llm.js";
+export type { ChatCompletionResult, ChatMessage, FetchFn } from "./llm.js";
+export { parseRewriteResponse, rewriteSystemPrompt, shortHypothesis } from "./rewrite.js";
+export { caseUserText, formatScoreTable, scoreCase } from "./eval.js";
+export { promotionDecision } from "./promote.js";
 export {
   loadCard,
   loadCardFromFile,
