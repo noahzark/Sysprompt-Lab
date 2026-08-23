@@ -104,7 +104,7 @@ Optional:
 
 ## Multimodal eval
 
-Cases may set `input.image` or `input.image_path`. The student request is system + user text + an OpenAI-compatible `image_url` (local jpeg/png/webp → data URL). Paths resolve relative to the suite file, the card ingest dir, or `SYSPROMPT_IMAGE_DIR`. Keep vision benches and image binaries **local only** — never commit them. R0/R1 rewrite stays text; put `got X want Y` in the scorer note. R2 / GEPA is not vision-aware. Optional suite fields `temperature` / `max_tokens` (or CLI `--temperature` / `--max-tokens`) apply to **student** eval only. Custom metric `id: nsfw_severity_tag` exact-matches one JSON `tags[]` severity label.
+Cases may set `input.image` or `input.image_path`. The student request is system + user text + an OpenAI-compatible `image_url` (local jpeg/png/webp → data URL). Paths resolve relative to the suite file, the card ingest dir, or `SYSPROMPT_IMAGE_DIR`. Keep vision benches and image binaries **local only** — never commit them. R0/R1 rewrite stays text; put `got X want Y` (or `got X want A|B` when gold lists several tiers) in the scorer note. R2 / GEPA is not vision-aware. Optional suite fields `temperature` / `max_tokens` (or CLI `--temperature` / `--max-tokens`) apply to **student** eval only. Custom metric `id: nsfw_severity_tag` matches one JSON `tags[]` severity label against gold; gold may list multiple acceptable severities (`accept` or a `severity` array) for borderline images.
 
 ## Promote gate
 

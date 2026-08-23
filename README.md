@@ -129,7 +129,7 @@ Flags:
 
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 
-Vision cases are supported in the framework (`input.image` / `input.image_path`, student `--temperature` / `--max-tokens`, custom metric `nsfw_severity_tag`) but **do not commit** image binaries or a real tagging bench. Keep the suite and files on your machine; point images at a local directory or `SYSPROMPT_IMAGE_DIR`.
+Vision cases are supported in the framework (`input.image` / `input.image_path`, student `--temperature` / `--max-tokens`, custom metric `nsfw_severity_tag`) but **do not commit** image binaries or a real tagging bench. Keep the suite and files on your machine; point images at a local directory or `SYSPROMPT_IMAGE_DIR`. Gold for `nsfw_severity_tag` may list multiple acceptable severities (`accept` or a `severity` array) for borderline images.
 
 ## 在哪里配置 / Where to configure
 

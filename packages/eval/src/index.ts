@@ -25,6 +25,7 @@ export type {
 export { adoptDecision, promotionDecision, r1PromotionDecision } from "./promote.js";
 export type { AdoptDecision, PromotionDecision } from "./promote.js";
 export {
+  goldAcceptSet,
   goldSeverity,
   isNsfwSeverityTag,
   NSFW_SEVERITY_TAGS,

@@ -12,6 +12,7 @@ import {
   r1PromotionDecision,
   resolveEvalSampling,
   resolveImagePath,
+  goldAcceptSet,
   scoreCase,
   scoreNsfwSeverityTag,
 } from "@sysprompt-lab/eval";
@@ -53,11 +54,31 @@ describe("scoreCase", () => {
     expect(scoreCase(nsfw, output, { severity: "软色情" }).quality).toBe(1);
     expect(scoreCase(nsfw, output, { severity: "露骨" }).quality).toBe(0);
     expect(scoreCase(nsfw, output, { severity: "露骨" }).note).toBe("got 软色情 want 露骨");
+    expect(
+      scoreCase(nsfw, '{"tags":["擦边"]}', { severity: "软色情", accept: ["擦边", "软色情"] })
+        .quality,
+    ).toBe(1);
+  });
+});
+
+describe("goldAcceptSet", () => {
+  it("reads string, primary severity, accept, and severity-array gold", () => {
+    expect(goldAcceptSet("软色情")).toEqual(["软色情"]);
+    expect(goldAcceptSet({ severity: "软色情" })).toEqual(["软色情"]);
+    expect(goldAcceptSet({ severity: "软色情", accept: ["擦边", "软色情"] })).toEqual([
+      "擦边",
+      "软色情",
+    ]);
+    expect(goldAcceptSet({ accept: ["擦边", "软色情"] })).toEqual(["擦边", "软色情"]);
+    expect(goldAcceptSet({ severity: ["擦边", "软色情"] })).toEqual(["擦边", "软色情"]);
+    expect(goldAcceptSet({ severity: "软色情", accept: [] })).toEqual(["软色情"]);
+    expect(goldAcceptSet({})).toEqual([]);
   });
 });
 
 describe("scoreNsfwSeverityTag", () => {
   const gold = { severity: "软色情" };
+  const tagged = (tags: string[]) => JSON.stringify({ tags, description: "", score: 1 });
 
   it("scores an exact single severity tag", () => {
     expect(
@@ -86,6 +107,36 @@ describe("scoreNsfwSeverityTag", () => {
       scoreNsfwSeverityTag('{"tags":["软色情","露骨"],"description":"","score":1}', gold).note,
     ).toBe("got 软色情+露骨 want 软色情");
     expect(scoreNsfwSeverityTag("not json", gold).note).toBe("got (unparseable) want 软色情");
+  });
+
+  it("passes when the predicted tag is in gold.accept", () => {
+    const withAccept = { severity: "软色情", accept: ["擦边", "软色情"] };
+    expect(scoreNsfwSeverityTag(tagged(["擦边"]), withAccept).quality).toBe(1);
+    expect(scoreNsfwSeverityTag(tagged(["软色情"]), withAccept).quality).toBe(1);
+    expect(scoreNsfwSeverityTag(tagged(["性感"]), withAccept)).toEqual({
+      quality: 0,
+      note: "got 性感 want 擦边|软色情",
+    });
+  });
+
+  it("treats omitted accept as [severity] and accept-only gold as the set", () => {
+    expect(scoreNsfwSeverityTag(tagged(["软色情"]), { severity: "软色情" }).quality).toBe(1);
+    expect(scoreNsfwSeverityTag(tagged(["擦边"]), { accept: ["擦边", "软色情"] }).quality).toBe(1);
+    expect(scoreNsfwSeverityTag(tagged(["露骨"]), { accept: ["擦边", "软色情"] }).note).toBe(
+      "got 露骨 want 擦边|软色情",
+    );
+  });
+
+  it("treats a severity string array as the accept set", () => {
+    const arrayGold = { severity: ["擦边", "软色情"] };
+    expect(scoreNsfwSeverityTag(tagged(["擦边"]), arrayGold).quality).toBe(1);
+    expect(scoreNsfwSeverityTag(tagged(["软色情"]), arrayGold).quality).toBe(1);
+    expect(scoreNsfwSeverityTag(tagged(["硬色情"]), arrayGold).note).toBe(
+      "got 硬色情 want 擦边|软色情",
+    );
+    expect(scoreNsfwSeverityTag("not json", arrayGold).note).toBe(
+      "got (unparseable) want 擦边|软色情",
+    );
   });
 });
 
