@@ -92,12 +92,31 @@ export function writeSuite(ws: Workspace, suite: EvalSuite): string {
   return path;
 }
 
+export function writeJsonl(path: string, rows: unknown[]): void {
+  const body = rows.map((row) => JSON.stringify(row)).join("\n");
+  writeFileSync(path, body.length > 0 ? `${body}\n` : "", "utf8");
+}
+
 export function writeRun(
   ws: Workspace,
   run: Run,
   candidates: Candidate[],
-  extra?: { diff?: string; scores?: Score[] },
-): { dir: string; runPath: string; candidatesPath: string; diffPath?: string; scoresPath?: string } {
+  extra?: {
+    diff?: string;
+    diffName?: string;
+    scores?: Score[];
+    candidatesJsonl?: unknown[];
+    summary?: string;
+  },
+): {
+  dir: string;
+  runPath: string;
+  candidatesPath: string;
+  diffPath?: string;
+  scoresPath?: string;
+  candidatesJsonlPath?: string;
+  summaryPath?: string;
+} {
   ensureWorkspace(ws);
   const dir = runDir(ws, run.id);
   mkdirSync(dir, { recursive: true });
@@ -110,7 +129,7 @@ export function writeRun(
   );
   let diffPath: string | undefined;
   if (extra?.diff !== undefined) {
-    diffPath = join(dir, "r0.diff");
+    diffPath = join(dir, extra.diffName ?? "r0.diff");
     writeFileSync(diffPath, extra.diff.endsWith("\n") ? extra.diff : `${extra.diff}\n`, "utf8");
   }
   let scoresPath: string | undefined;
@@ -121,7 +140,21 @@ export function writeRun(
       extra.scores.map((s) => parseScore(s)),
     );
   }
-  return { dir, runPath, candidatesPath, diffPath, scoresPath };
+  let candidatesJsonlPath: string | undefined;
+  if (extra?.candidatesJsonl) {
+    candidatesJsonlPath = join(dir, "candidates.jsonl");
+    writeJsonl(candidatesJsonlPath, extra.candidatesJsonl);
+  }
+  let summaryPath: string | undefined;
+  if (extra?.summary !== undefined) {
+    summaryPath = join(dir, "summary.md");
+    writeFileSync(
+      summaryPath,
+      extra.summary.endsWith("\n") ? extra.summary : `${extra.summary}\n`,
+      "utf8",
+    );
+  }
+  return { dir, runPath, candidatesPath, diffPath, scoresPath, candidatesJsonlPath, summaryPath };
 }
 
 export function loadCardFromFile(path: string): PromptCard {

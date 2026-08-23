@@ -26,7 +26,7 @@ export function shortHypothesis(text: string, max = 120): string {
   return `${oneLine.slice(0, max - 1)}…`;
 }
 
-function stripFences(text: string): string {
+export function stripFences(text: string): string {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   return fenced ? fenced[1].trim() : trimmed;

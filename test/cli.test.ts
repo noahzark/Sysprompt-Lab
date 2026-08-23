@@ -97,15 +97,38 @@ describe("Phase 1 R0 stub", () => {
     expect(run.card_id).toBe("support-bot");
   });
 
-  it("CLI rejects R1/R2 and accepts R0 --dry-run without network", () => {
+  it("CLI rejects R2, accepts R0 --dry-run, and requires bind before R1", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-r0-cli-"));
     runCli(root, ["ingest", example]);
-    expect(() => runCli(root, ["run", "support-bot", "--rung", "R1"])).toThrow(/not implemented/);
     expect(() => runCli(root, ["run", "support-bot", "--rung", "R2"])).toThrow(/not implemented/);
+    expect(() => runCli(root, ["run", "support-bot", "--rung", "R1", "--dry-run"])).toThrow(
+      /must be bound/,
+    );
     const out = runCli(root, ["run", "support-bot", "--rung", "R0", "--dry-run"]);
     expect(out).toMatch(/R0 stub/);
     expect(out).toMatch(/hypothesis=stub/);
     expect(out).toMatch(/LLM config not set|LLM \(unused in stub\)/);
+  });
+
+  it("CLI R1 --dry-run writes r1.diff and candidates.jsonl without network", () => {
+    const root = mkdtempSync(join(tmpdir(), "spl-r1-cli-"));
+    runCli(root, ["ingest", example]);
+    runCli(root, ["bind", "support-bot", join(example, "suite.yaml")]);
+    const out = runCli(root, [
+      "run",
+      "support-bot",
+      "--rung",
+      "R1",
+      "--dry-run",
+      "--rounds",
+      "1",
+      "--candidates",
+      "2",
+    ]);
+    expect(out).toMatch(/R1 dry-run/);
+    expect(out).toMatch(/r1\.diff/);
+    expect(out).toMatch(/candidates\.jsonl/);
+    expect(out).not.toContain("sk-");
   });
 
   it("prints masked LLM base/model on --dry-run when env is set, without a network call", () => {

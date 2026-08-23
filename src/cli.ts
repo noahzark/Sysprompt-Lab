@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { bind, exportCard, ingest, promoteVersion, runR0 } from "./commands.js";
+import { bind, exportCard, ingest, promoteVersion, runR0, runR1 } from "./commands.js";
 import { formatLlmTarget, loadEnvFiles, peekRootFlag, readLlmConfig } from "./env.js";
 import { loadCardFromFile, loadSuiteFromFile } from "./workspace.js";
 
@@ -10,7 +10,7 @@ const program = new Command();
 
 program
   .name("sysprompt")
-  .description("Sysprompt Lab — ingest, bind, R0 rewrite + eval, export system-prompt cards")
+  .description("Sysprompt Lab — ingest, bind, R0 rewrite / R1 eval-loop, export system-prompt cards")
   .version("0.1.0")
   .option("--root <dir>", "workspace root that holds .spl/ (default: cwd)");
 
@@ -47,43 +47,110 @@ program
 
 program
   .command("run")
-  .description("Optimization run. Phase 1: --rung R0 rewrites with an LLM and evals before/after")
+  .description("Optimization run. --rung R0 rewrites once; --rung R1 runs the eval loop")
   .argument("<card>", "card id or path to card JSON")
   .requiredOption("--rung <rung>", "R0 | R1 | R2")
-  .option("--dry-run", "No LLM calls; copy baseline (Phase 0 stub, for tests)")
-  .option("--no-eval", "Rewrite only; skip before/after eval and auto-promote")
-  .action(async (card: string, opts: { rung: string; dryRun?: boolean; eval?: boolean }) => {
-    const rung = opts.rung.toUpperCase();
-    if (rung !== "R0") {
-      throw new Error(`${rung} is not implemented yet. Only --rung R0 is available (R1/R2 are later phases).`);
-    }
-    const dryRun = Boolean(opts.dryRun);
-    const noEval = opts.eval === false;
-    const result = await runR0(card, { root: rootOpt(), dryRun, noEval });
-    if (result.dryRun) {
-      console.log(`R0 stub ${result.run.id}: candidate ${result.candidate.id} (hypothesis=stub)`);
-      console.log(`diff → ${result.diffPath}`);
-      const llm = readLlmConfig();
-      if (llm) {
-        console.log(`LLM (unused in stub) ${formatLlmTarget(llm)}`);
-      } else {
-        console.log("LLM config not set — stub does not call a model");
+  .option("--dry-run", "No LLM calls; stub/fake candidates (for tests)")
+  .option("--no-eval", "Rewrite only; skip eval and auto-promote")
+  .option("--rounds <n>", "R1 max search rounds (default 3, or SYSPROMPT_R1_ROUNDS)")
+  .option("--candidates <n>", "R1 candidates per round (default 3, or SYSPROMPT_R1_CANDIDATES)")
+  .option("--pass-streak <n>", "R1 stop after N consecutive adopts (default 1, or SYSPROMPT_R1_PASS_STREAK)")
+  .option("--budget <n>", "R1 max candidate evals (default rounds×candidates, or SYSPROMPT_R1_BUDGET)")
+  .action(
+    async (
+      card: string,
+      opts: {
+        rung: string;
+        dryRun?: boolean;
+        eval?: boolean;
+        rounds?: string;
+        candidates?: string;
+        passStreak?: string;
+        budget?: string;
+      },
+    ) => {
+      const rung = opts.rung.toUpperCase();
+      if (rung === "R2") {
+        throw new Error("R2 (GEPA wrap) is not implemented yet. Use --rung R0 or --rung R1.");
       }
-      return;
-    }
-    console.log(`R0 ${result.run.id}: candidate ${result.candidate.id} (hypothesis=${result.version.hypothesis})`);
-    console.log(`diff → ${result.diffPath}`);
-    if (result.llmTarget) {
-      console.log(`LLM ${result.llmTarget}`);
-    }
-    if (result.table) {
-      console.log(result.table);
-    }
-    if (result.scoresPath) {
-      console.log(`scores → ${result.scoresPath}`);
-    }
-    console.log(result.message);
-  });
+      if (rung !== "R0" && rung !== "R1") {
+        throw new Error(`Unknown rung "${opts.rung}". Use R0, R1, or R2.`);
+      }
+      const dryRun = Boolean(opts.dryRun);
+      const noEval = opts.eval === false;
+      if (rung === "R0") {
+        const result = await runR0(card, { root: rootOpt(), dryRun, noEval });
+        if (result.dryRun) {
+          console.log(`R0 stub ${result.run.id}: candidate ${result.candidate.id} (hypothesis=stub)`);
+          console.log(`diff → ${result.diffPath}`);
+          const llm = readLlmConfig();
+          if (llm) {
+            console.log(`LLM (unused in stub) ${formatLlmTarget(llm)}`);
+          } else {
+            console.log("LLM config not set — stub does not call a model");
+          }
+          return;
+        }
+        console.log(`R0 ${result.run.id}: candidate ${result.candidate.id} (hypothesis=${result.version.hypothesis})`);
+        console.log(`diff → ${result.diffPath}`);
+        if (result.llmTarget) {
+          console.log(`LLM ${result.llmTarget}`);
+        }
+        if (result.table) {
+          console.log(result.table);
+        }
+        if (result.scoresPath) {
+          console.log(`scores → ${result.scoresPath}`);
+        }
+        console.log(result.message);
+        return;
+      }
+
+      const result = await runR1(card, {
+        root: rootOpt(),
+        dryRun,
+        noEval,
+        rounds: parseOptionalInt(opts.rounds, "--rounds"),
+        candidates: parseOptionalInt(opts.candidates, "--candidates"),
+        passStreak: parseOptionalInt(opts.passStreak, "--pass-streak"),
+        budget: parseOptionalInt(opts.budget, "--budget"),
+      });
+      if (result.dryRun) {
+        console.log(
+          `R1 dry-run ${result.run.id}: ${result.candidates.length} fake candidate(s), ${result.roundsRan} round(s)`,
+        );
+        console.log(`diff → ${result.diffPath}`);
+        if (result.candidatesJsonlPath) {
+          console.log(`candidates → ${result.candidatesJsonlPath}`);
+        }
+        const llm = readLlmConfig();
+        if (llm) {
+          console.log(`LLM (unused in stub) ${formatLlmTarget(llm)}`);
+        } else {
+          console.log("LLM config not set — stub does not call a model");
+        }
+        console.log(result.message);
+        return;
+      }
+      console.log(
+        `R1 ${result.run.id}: ${result.roundsRan} round(s), ${result.candidates.length} candidate(s), adopted ${result.adoptedCount}`,
+      );
+      console.log(`diff → ${result.diffPath}`);
+      if (result.llmTarget) {
+        console.log(`LLM ${result.llmTarget}`);
+      }
+      if (result.table) {
+        console.log(result.table);
+      }
+      if (result.scoresPath) {
+        console.log(`scores → ${result.scoresPath}`);
+      }
+      if (result.candidatesJsonlPath) {
+        console.log(`candidates → ${result.candidatesJsonlPath}`);
+      }
+      console.log(result.message);
+    },
+  );
 
 program
   .command("promote")
@@ -111,6 +178,17 @@ program
 
 function rootOpt(): string | undefined {
   return program.opts<{ root?: string }>().root;
+}
+
+function parseOptionalInt(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`${label} must be a positive integer, got "${value}"`);
+  }
+  return n;
 }
 
 program.parseAsync().catch((error) => {
