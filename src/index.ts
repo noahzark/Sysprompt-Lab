@@ -70,3 +70,12 @@ export {
   writeSuite,
 } from "./workspace.js";
 export { unifiedPromptDiff } from "./diff.js";
+export {
+  formatLlmTarget,
+  getLlmConfig,
+  loadEnvFiles,
+  maskToken,
+  peekRootFlag,
+  readLlmConfig,
+} from "./env.js";
+export type { LlmConfig } from "./env.js";

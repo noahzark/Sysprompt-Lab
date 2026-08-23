@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { bind, exportCard, ingest, runR0 } from "./commands.js";
+import { formatLlmTarget, loadEnvFiles, peekRootFlag, readLlmConfig } from "./env.js";
 import { loadCardFromFile, loadSuiteFromFile } from "./workspace.js";
+
+loadEnvFiles({ cwd: process.cwd(), root: peekRootFlag() });
 
 const program = new Command();
 
@@ -55,6 +58,12 @@ program
     const result = runR0(card, { root: rootOpt() });
     console.log(`R0 stub ${result.run.id}: candidate ${result.candidate.id} (hypothesis=stub)`);
     console.log(`diff → ${result.diffPath}`);
+    const llm = readLlmConfig();
+    if (llm) {
+      console.log(`LLM (unused in stub) ${formatLlmTarget(llm)}`);
+    } else {
+      console.log("LLM config not set — stub does not call a model");
+    }
   });
 
 program

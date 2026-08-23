@@ -60,6 +60,22 @@ npm run sysprompt -- run support-bot --rung R0
 
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 
+## 在哪里配置 / Where to configure
+
+把仓库根目录（或运行 CLI 时的当前工作目录）里的 `.env.example` 复制为 `.env`，填写这三个变量：
+
+| 变量 | 含义 |
+|---|---|
+| `LLM_API_BASE` | OpenAI 兼容 API 根地址 |
+| `LLM_API` | 模型 / API id（如 `gpt-4o-mini`、`deepseek-chat`） |
+| `LLM_API_TOKEN` | 密钥；只写在 `.env`，不要提交 |
+
+```bash
+cp .env.example .env
+```
+
+`ingest` / `bind` / `export` 不需要这些变量。真正调模型的档位才会调用 `getLlmConfig()`。当前的 `run --rung R0` 仍是 stub：若 `.env` 已填写，只打印将使用的 base / model（token 打码），不会发请求。
+
 ## Library
 
 ```ts

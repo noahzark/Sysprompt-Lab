@@ -11,11 +11,11 @@ const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(repo, "src", "cli.ts");
 const example = join(repo, "examples", "support-bot");
 
-function runCli(root: string, args: string[]): string {
+function runCli(root: string, args: string[], extraEnv: NodeJS.ProcessEnv = {}): string {
   return execFileSync(process.execPath, ["--import", "tsx", cli, "--root", root, ...args], {
     encoding: "utf8",
     cwd: repo,
-    env: { ...process.env },
+    env: { ...process.env, ...extraEnv },
   });
 }
 
@@ -104,5 +104,20 @@ describe("Phase 1 R0 stub", () => {
     const out = runCli(root, ["run", "support-bot", "--rung", "R0"]);
     expect(out).toMatch(/R0 stub/);
     expect(out).toMatch(/hypothesis=stub/);
+    expect(out).toMatch(/LLM config not set|LLM \(unused in stub\)/);
+  });
+
+  it("prints masked LLM base/model when env is set, without requiring a network call", () => {
+    const root = mkdtempSync(join(tmpdir(), "spl-r0-llm-"));
+    runCli(root, ["ingest", example]);
+    const token = "sk-super-secret-token";
+    const out = runCli(root, ["run", "support-bot", "--rung", "R0"], {
+      LLM_API_BASE: "https://api.openai.com/v1",
+      LLM_API: "gpt-4o-mini",
+      LLM_API_TOKEN: token,
+    });
+    expect(out).toMatch(/gpt-4o-mini @ https:\/\/api\.openai\.com\/v1/);
+    expect(out).toContain("token sk-…en");
+    expect(out).not.toContain(token);
   });
 });
