@@ -24,7 +24,6 @@ import {
 
 const repo = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 const exampleDir = join(repo, "examples", "support-bot");
-const imageTaggerDir = join(repo, "examples", "image-tagger");
 
 const requiredBySchema: Record<keyof typeof namedSchemas, string[]> = {
   "prompt-card": ["id", "source", "rung", "status"],
@@ -86,20 +85,25 @@ describe("example files", () => {
     expect(validate(suite), JSON.stringify(validate.errors)).toBe(true);
   });
 
-  it("validates the image-tagger suite (vision + custom metric + sampling)", () => {
-    const suite = loadSuiteFromFile(join(imageTaggerDir, "suite.yaml"));
-    expect(suite.id).toBe("image-tagger");
-    expect(suite.metric).toEqual({
-      id: "nsfw_severity_tag",
-      kind: "custom",
-      returns_feedback: true,
+  it("accepts optional student sampling and a vision case shape", () => {
+    const suite = normalizeSuite({
+      id: "vision-shape",
+      name: "vision-shape",
+      temperature: 1,
+      max_tokens: 4096,
+      metric: { id: "nsfw_severity_tag", kind: "custom", returns_feedback: true },
+      splits: { train: ["c1"], val: [] },
+      cases: [
+        {
+          id: "c1",
+          input: { image: "images/fixture.png", user: "look" },
+          gold: { severity: "性感" },
+        },
+      ],
     });
     expect(suite.temperature).toBe(1);
     expect(suite.max_tokens).toBe(4096);
-    expect(suite.cases).toHaveLength(8);
-    expect(suite.splits.train.case_ids).toHaveLength(5);
-    expect(suite.splits.val.case_ids).toHaveLength(3);
-    expect(suite.cases.every((item) => typeof item.input.image === "string")).toBe(true);
+    expect(suite.cases[0]?.input.image).toBe("images/fixture.png");
 
     const ajv = new Ajv({ allErrors: true, strict: false });
     const validate = ajv.compile(jsonSchemaFor("eval-suite"));

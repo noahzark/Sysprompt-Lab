@@ -33,7 +33,7 @@ packages/rungs     R0 / R1 / R2 orchestration (R2 calls python/)
 packages/cli       sysprompt / spl bins and commands
 python/            GEPA sidecar (not inside a TS package)
 schemas/           JSON Schema draft-07 sources of truth
-examples/          Ingestable cards (support-bot, image-tagger)
+examples/          Ingestable cards (support-bot)
 docs/              Product plan
 ```
 
@@ -127,7 +127,9 @@ Flags:
 | `--temperature <n>` | R0/R1 **student** eval temperature (default `0`, or `suite.temperature`). Rewriter stays colder |
 | `--max-tokens <n>` | R0/R1 **student** eval `max_tokens` (omit by default, or `suite.max_tokens`) |
 
-More detail: [examples/support-bot/README.md](examples/support-bot/README.md). Vision / NSFW-tag example (images not in git): [examples/image-tagger/README.md](examples/image-tagger/README.md).
+More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
+
+Vision cases are supported in the framework (`input.image` / `input.image_path`, student `--temperature` / `--max-tokens`, custom metric `nsfw_severity_tag`) but **do not commit** image binaries or a real tagging bench. Keep the suite and files on your machine; point images at a local directory or `SYSPROMPT_IMAGE_DIR`.
 
 ## 在哪里配置 / Where to configure
 

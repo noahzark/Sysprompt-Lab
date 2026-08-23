@@ -32,7 +32,7 @@ Do not reimplement GEPA. Do not fork AGPL tools. Do not invent a second object m
     cli/                    # `sysprompt` / `spl` bin and commands
   python/                   # GEPA sidecar (stdin/stdout JSON job). Not a TS package
   schemas/                  # JSON Schema (draft-07) sources of truth
-  examples/                 # ingestable cards (support-bot; image-tagger images stay out of git)
+  examples/                 # ingestable cards (support-bot must keep working)
   docs/                     # product plan, not package internals
 ```
 
@@ -104,7 +104,7 @@ Optional:
 
 ## Multimodal eval
 
-Cases may set `input.image` or `input.image_path`. The student request is system + user text + an OpenAI-compatible `image_url` (local jpeg/png/webp → data URL). Paths resolve relative to the suite file, the card ingest dir, or `SYSPROMPT_IMAGE_DIR`. **Never commit sensitive image binaries** (see `examples/image-tagger/`). R0/R1 rewrite stays text; put `got X want Y` in the scorer note. R2 / GEPA is not vision-aware.
+Cases may set `input.image` or `input.image_path`. The student request is system + user text + an OpenAI-compatible `image_url` (local jpeg/png/webp → data URL). Paths resolve relative to the suite file, the card ingest dir, or `SYSPROMPT_IMAGE_DIR`. Keep vision benches and image binaries **local only** — never commit them. R0/R1 rewrite stays text; put `got X want Y` in the scorer note. R2 / GEPA is not vision-aware. Optional suite fields `temperature` / `max_tokens` (or CLI `--temperature` / `--max-tokens`) apply to **student** eval only. Custom metric `id: nsfw_severity_tag` exact-matches one JSON `tags[]` severity label.
 
 ## Promote gate
 
@@ -134,7 +134,7 @@ Behavioral contract — keep these defaults unless a flag/env overrides them:
 - `npm run test:python` covers sidecar metric helpers without downloading `gepa`.
 - Never commit secrets, `.env`, or `.spl/` workspace artifacts.
 - Keep `examples/support-bot` ingest → bind → export working from the repo root.
-- Keep `examples/image-tagger` ingest → bind → validate working without images. Never commit NSFW binaries.
+- Never commit vision-eval images, private suites, or NSFW binaries. Use local paths / `SYSPROMPT_IMAGE_DIR`.
 
 ## PR hygiene
 

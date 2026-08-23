@@ -68,7 +68,7 @@ export function severityTagsIn(tags: unknown): string[] {
 }
 
 /**
- * Primary image-tagger metric: exact match of the single NSFW severity tag.
+ * Custom metric `nsfw_severity_tag`: exact match of the single NSFW severity tag.
  * Feedback on miss is `got X want Y` for the R1 rewriter (text only).
  */
 export function scoreNsfwSeverityTag(

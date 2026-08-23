@@ -30,7 +30,7 @@ TypeScript is an npm workspace. Dependency direction is `cli → rungs → rewri
 | `packages/cli` | `sysprompt` / `spl` bins, ingest / bind / export / promote / run |
 | `python/` | `python -m sysprompt_gepa` sidecar (stdin/stdout JSON job) |
 | `schemas/` | draft-07 sources of truth |
-| `examples/` | Ingestable cards; `support-bot` must keep working; `image-tagger` is vision (images not in git) |
+| `examples/` | Ingestable cards; `support-bot` must keep working |
 
 See [AGENTS.md](../AGENTS.md) for durable conventions (promote gate, patch-mode defaults, env vars).
 
