@@ -54,6 +54,7 @@ export {
   ingest,
   promoteVersion,
   runR0,
+  runR1,
 } from "./commands.js";
 export type {
   BindResult,
@@ -62,12 +63,17 @@ export type {
   PromoteResult,
   RunR0Options,
   RunR0Result,
+  RunR1Options,
+  RunR1Result,
 } from "./commands.js";
 export { chatCompletion, chatCompletionsUrl, normalizeLlmApiBase } from "./llm.js";
 export type { ChatCompletionResult, ChatMessage, FetchFn } from "./llm.js";
-export { parseRewriteResponse, rewriteSystemPrompt, shortHypothesis } from "./rewrite.js";
+export { parseRewriteResponse, rewriteSystemPrompt, shortHypothesis, stripFences } from "./rewrite.js";
 export { caseUserText, formatScoreTable, scoreCase } from "./eval.js";
-export { promotionDecision } from "./promote.js";
+export { adoptDecision, promotionDecision, r1PromotionDecision } from "./promote.js";
+export { parseR1Candidates, dedupeProposals } from "./r1-rewrite.js";
+export { resolveR1Config } from "./r1.js";
+export { sanitizeValue, selectEvidenceCases, formatEvidence } from "./r1-evidence.js";
 export {
   loadCard,
   loadCardFromFile,

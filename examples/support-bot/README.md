@@ -44,3 +44,22 @@ No-network stub (same as tests):
 ```bash
 npm run sysprompt -- run support-bot --rung R0 --dry-run
 ```
+
+## Live R1
+
+Same `.env` as R0. Bind the suite first, then run the eval loop. Search uses **train**; adopt / promote use **val** when the suite has val cases.
+
+```bash
+npm run sysprompt -- ingest examples/support-bot
+npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
+npm run sysprompt -- run support-bot --rung R1
+```
+
+Artifacts under `.spl/runs/<id>/`: `candidates.jsonl` (every tried candidate), `scores.json`, `r1.diff` (baseline → best), `summary.md`. Auto-promote only if final val strictly beats the original baseline.
+
+Optional knobs (flags override `SYSPROMPT_R1_*`):
+
+```bash
+npm run sysprompt -- run support-bot --rung R1 --rounds 3 --candidates 3 --pass-streak 1
+npm run sysprompt -- run support-bot --rung R1 --dry-run
+```

@@ -62,11 +62,20 @@ export function mean(values: number[]): number {
   return values.reduce((sum, n) => sum + n, 0) / values.length;
 }
 
+export interface CaseEvalResult {
+  evalCase: EvalCase;
+  output: string;
+  quality: number;
+  note?: string;
+  latency_ms: number;
+}
+
 export interface SplitEval {
   split: SplitName;
   scores: Score[];
   meanQuality: number;
   meanLatency: number;
+  cases: CaseEvalResult[];
 }
 
 export async function evaluatePrompt(options: {
@@ -79,6 +88,7 @@ export async function evaluatePrompt(options: {
 }): Promise<SplitEval> {
   const cases = casesForSplit(options.suite, options.split);
   const scores: Score[] = [];
+  const caseResults: CaseEvalResult[] = [];
   for (const evalCase of cases) {
     const result = await chatCompletion(
       options.config,
@@ -88,7 +98,7 @@ export async function evaluatePrompt(options: {
       ],
       { temperature: 0, fetch: options.fetch },
     );
-    const { quality } = scoreCase(options.suite.metric, result.content, evalCase.gold);
+    const { quality, note } = scoreCase(options.suite.metric, result.content, evalCase.gold);
     scores.push({
       quality,
       latency_ms: result.latency_ms,
@@ -98,12 +108,20 @@ export async function evaluatePrompt(options: {
       version_id: options.versionId,
       case_id: evalCase.id,
     });
+    caseResults.push({
+      evalCase,
+      output: result.content,
+      quality,
+      note,
+      latency_ms: result.latency_ms,
+    });
   }
   return {
     split: options.split,
     scores,
     meanQuality: mean(scores.map((s) => s.quality)),
     meanLatency: mean(scores.map((s) => s.latency_ms ?? 0)),
+    cases: caseResults,
   };
 }
 

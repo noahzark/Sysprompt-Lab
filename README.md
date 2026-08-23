@@ -63,6 +63,16 @@ npm run sysprompt -- export support-bot
 
 `run --rung R0` calls the configured OpenAI-compatible API, writes a candidate + unified diff under `.spl/runs/<id>/r0.diff`, scores **train** and **val** (if the suite has val cases) with the same metric, and auto-promotes **only** when val mean quality strictly rises. Otherwise the new version stays `promoted=false`. Train-only suites never auto-promote.
 
+Live R1 eval-loop (same `.env`). The card must already be bound to a suite:
+
+```bash
+npm run sysprompt -- ingest examples/support-bot
+npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
+npm run sysprompt -- run support-bot --rung R1
+```
+
+R1 scores the baseline, shows the rewriter train failures + scores + history, proposes a few full-prompt candidates, evals each one on the same suite, and adopts only if the score rises (val first, train as a val-tie break; train-only if the suite has no val cases). After the loop it writes `.spl/runs/<id>/candidates.jsonl`, `scores.json`, and `r1.diff` (baseline → best). Auto-promote happens only if the **final** val (or train if there is no val) strictly beats the original baseline; otherwise the run stays unpromoted and the CLI says so.
+
 Human accept without auto-promote:
 
 ```bash
@@ -75,10 +85,14 @@ Flags:
 
 | Flag | Effect |
 |---|---|
-| `--dry-run` | No LLM calls; copy the baseline (Phase 0 stub, used by tests) |
-| `--no-eval` | Rewrite only; skip before/after eval and auto-promote |
+| `--dry-run` | No LLM calls. R0 copies the baseline; R1 writes fake candidates (used by tests) |
+| `--no-eval` | Rewrite only; skip eval and auto-promote |
+| `--rounds <n>` | R1 max search rounds (default `3`, or `SYSPROMPT_R1_ROUNDS`) |
+| `--candidates <n>` | R1 candidates per round (default `3`, or `SYSPROMPT_R1_CANDIDATES`) |
+| `--pass-streak <n>` | R1 stop after N consecutive adopts (default `1`, or `SYSPROMPT_R1_PASS_STREAK`) |
+| `--budget <n>` | R1 max candidate evals (default `rounds × candidates`, or `SYSPROMPT_R1_BUDGET`) |
 
-`run --rung R1` / `R2` are rejected.
+`run --rung R2` is rejected (GEPA wrap is a later phase).
 
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 
@@ -96,19 +110,21 @@ More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 cp .env.example .env
 ```
 
-`ingest` / `bind` / `export` / `run --dry-run` 不需要这些变量。真正调模型的 `run --rung R0` 会调用 `getLlmConfig()`；缺任一变量会报错并提示复制 `.env.example`。
+`ingest` / `bind` / `export` / `run --dry-run` 不需要这些变量。真正调模型的 `run --rung R0` / `R1` 会调用 `getLlmConfig()`；缺任一变量会报错并提示复制 `.env.example`。
+
+R1 循环次数也可用环境变量覆盖（命令行 flag 优先）：`SYSPROMPT_R1_ROUNDS`、`SYSPROMPT_R1_CANDIDATES`、`SYSPROMPT_R1_PASS_STREAK`、`SYSPROMPT_R1_BUDGET`。
 
 ## Library
 
 ```ts
-import { ingest, bind, exportCard, runR0, promoteVersion, loadCard, loadSuite } from "sysprompt-lab";
+import { ingest, bind, exportCard, runR0, runR1, promoteVersion, loadCard, loadSuite } from "sysprompt-lab";
 ```
 
 JSON Schema (draft-07) for every entity lives in [`schemas/`](schemas/). Zod sources in `src/schemas.ts` are the runtime validators and can re-emit those files (`npm run emit-schemas`).
 
 ## Status
 
-Phase 1: schemas + offline ingest / bind / export + real R0 rewrite and before/after eval. R1 / R2 / GEPA are not implemented.
+Phase 2: schemas + offline ingest / bind / export + R0 rewrite and R1 eval-loop. R2 / GEPA are not implemented.
 
 ## License
 

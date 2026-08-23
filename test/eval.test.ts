@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { caseUserText, formatScoreTable, scoreCase } from "../src/eval.js";
 import { parseRewriteResponse, shortHypothesis } from "../src/rewrite.js";
-import { promotionDecision } from "../src/promote.js";
+import { adoptDecision, promotionDecision, r1PromotionDecision } from "../src/promote.js";
 import type { Metric } from "../src/schemas.js";
 
 const exact: Metric = { id: "exact", kind: "exact", returns_feedback: false };
@@ -61,6 +61,77 @@ describe("promotionDecision", () => {
     expect(decision.promote).toBe(false);
     expect(decision.reason).toBe("train_only");
     expect(decision.message).toMatch(/train-only/);
+  });
+});
+
+describe("adoptDecision", () => {
+  it("requires a strict val rise and uses train as a val-tie break", () => {
+    expect(
+      adoptDecision({
+        hasVal: true,
+        currentVal: 0.5,
+        candidateVal: 0.75,
+        currentTrain: 0.2,
+        candidateTrain: 0.1,
+      }).adopt,
+    ).toBe(true);
+    expect(
+      adoptDecision({
+        hasVal: true,
+        currentVal: 0.5,
+        candidateVal: 0.5,
+        currentTrain: 0.2,
+        candidateTrain: 0.4,
+      }).reason,
+    ).toBe("val_tie_train_improved");
+    expect(
+      adoptDecision({
+        hasVal: true,
+        currentVal: 0.5,
+        candidateVal: 0.4,
+        currentTrain: 0.2,
+        candidateTrain: 1,
+      }).adopt,
+    ).toBe(false);
+  });
+
+  it("requires a strict train rise when there is no val split", () => {
+    expect(
+      adoptDecision({ hasVal: false, currentTrain: 0.2, candidateTrain: 0.3 }).adopt,
+    ).toBe(true);
+    expect(
+      adoptDecision({ hasVal: false, currentTrain: 0.3, candidateTrain: 0.3 }).adopt,
+    ).toBe(false);
+  });
+});
+
+describe("r1PromotionDecision", () => {
+  it("promotes when final val (or train if no val) beats the original baseline", () => {
+    expect(
+      r1PromotionDecision({
+        hasVal: true,
+        originalVal: 0.4,
+        finalVal: 0.6,
+        originalTrain: 0.1,
+        finalTrain: 0.2,
+      }).promote,
+    ).toBe(true);
+    expect(
+      r1PromotionDecision({
+        hasVal: true,
+        originalVal: 0.5,
+        finalVal: 0.5,
+        originalTrain: 0.1,
+        finalTrain: 0.9,
+      }).promote,
+    ).toBe(false);
+    expect(
+      r1PromotionDecision({
+        hasVal: false,
+        originalTrain: 0.2,
+        finalTrain: 0.8,
+      }).promote,
+    ).toBe(true);
   });
 });
 
