@@ -433,6 +433,65 @@ cases:
     expect(diff).toMatch(/R1 dry-run candidate/);
   });
 
+  it("applies edits JSON so the candidate is not a full unrelated rewrite", async () => {
+    setLlmEnv();
+    const root = mkdtempSync(join(tmpdir(), "spl-r1-patch-"));
+    const system = `# Role
+You are a support agent.
+
+# Rules
+Never invent order details.
+
+# Style
+Be brief.
+`;
+    writeMiniCard(root, system, valSuite);
+
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      const systemMsg = String(body.messages[0]?.content ?? "");
+      if (systemMsg.includes("R1 eval-loop")) {
+        expect(systemMsg).toMatch(/patch only what the failures implicate|Do not rewrite the entire prompt/i);
+        return completion(
+          JSON.stringify({
+            candidates: [
+              {
+                hypothesis: "Ask the model to say good",
+                edits: [
+                  {
+                    op: "replace_section",
+                    section_id: "s3",
+                    content: "# Style\nIMPROVED: always reply with good.\n",
+                  },
+                ],
+              },
+            ],
+          }),
+        );
+      }
+      if (systemMsg.includes("IMPROVED")) {
+        return completion("this is good");
+      }
+      return completion("nope");
+    };
+
+    const result = await runR1("mini", {
+      root,
+      fetch: fetchMock,
+      rounds: 1,
+      candidates: 1,
+      rewriteMode: "patch",
+    });
+    expect(result.rewriteMode).toBe("patch");
+    expect(result.adoptedCount).toBe(1);
+    expect(result.promoted).toBe(true);
+    expect(result.version.system_prompt).toContain("You are a support agent");
+    expect(result.version.system_prompt).toContain("Never invent order details");
+    expect(result.version.system_prompt).toContain("IMPROVED");
+    expect(result.version.system_prompt).not.toBe("Be vague and unhelpful.");
+    expect(result.sectionsPath).toBeDefined();
+  });
+
   it("rewrites only when --no-eval is set", async () => {
     setLlmEnv();
     const root = mkdtempSync(join(tmpdir(), "spl-r1-noeval-"));

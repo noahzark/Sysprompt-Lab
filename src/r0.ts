@@ -2,6 +2,16 @@ import { unifiedPromptDiff } from "./diff.js";
 import { formatScoreTable, evaluatePrompt, aggregateScore, casesForSplit, type ScoreRow } from "./eval.js";
 import { formatLlmTarget, getLlmConfig, readLlmConfig, type LlmConfig } from "./env.js";
 import { type FetchFn, normalizeLlmApiBase } from "./llm.js";
+import {
+  type RewriteMode,
+  dryRunPatch,
+  resolveAllowFullRewrite,
+  resolveEffectiveRewriteMode,
+  resolveMaxPatchRatio,
+  resolvePatchThreshold,
+  sectionMapArtifact,
+  splitSections,
+} from "./patch.js";
 import { promotionDecision } from "./promote.js";
 import { rewriteSystemPrompt } from "./rewrite.js";
 import {
@@ -27,6 +37,9 @@ export interface RunR0Options {
   dryRun?: boolean;
   noEval?: boolean;
   fetch?: FetchFn;
+  rewriteMode?: RewriteMode;
+  maxPatchRatio?: number;
+  allowFullRewrite?: boolean;
 }
 
 export interface RunR0Result {
@@ -42,6 +55,9 @@ export interface RunR0Result {
   table?: string;
   message: string;
   llmTarget?: string;
+  rewriteMode?: "patch" | "full";
+  sectionsPath?: string;
+  patchPath?: string;
 }
 
 function llmTargetLine(config: LlmConfig): string {
@@ -61,7 +77,7 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
   const baseline = baselineVersion(card);
 
   if (options.dryRun) {
-    return runDryStub(ws, card, baseline);
+    return runDryStub(ws, card, baseline, options);
   }
 
   const config = getLlmConfig();
@@ -74,6 +90,20 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
   const rewritten = await rewriteSystemPrompt(config, baseline.system_prompt, {
     tools: card.tools,
     fetch: options.fetch,
+    rewriteMode: options.rewriteMode,
+    maxPatchRatio: options.maxPatchRatio,
+    allowFullRewrite: options.allowFullRewrite,
+  });
+  const sections = rewritten.sections ?? splitSections(baseline.system_prompt);
+  const effectiveMode = rewritten.mode ?? "full";
+  const sectionArtifact = sectionMapArtifact({
+    sections,
+    rewriteMode: options.rewriteMode ?? "auto",
+    effectiveMode,
+    maxPatchRatio: resolveMaxPatchRatio(options.maxPatchRatio, "R0"),
+    allowFullRewrite: resolveAllowFullRewrite(options.allowFullRewrite, "R0", effectiveMode),
+    usedFallback: Boolean(rewritten.usedFallback),
+    sourceChars: baseline.system_prompt.length,
   });
 
   const version: PromptVersion = {
@@ -108,7 +138,11 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
   const diff = unifiedPromptDiff(baseline.system_prompt, version.system_prompt);
 
   if (options.noEval) {
-    const written = writeRun(ws, run, [candidate], { diff });
+    const written = writeRun(ws, run, [candidate], {
+      diff,
+      sections: sectionArtifact,
+      patch: rewritten.patch,
+    });
     if (!written.diffPath) {
       throw new Error("R0 failed to write a unified diff");
     }
@@ -123,6 +157,9 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
       dryRun: false,
       message: "Rewrite only (--no-eval); skipped before/after eval and auto-promote.",
       llmTarget,
+      rewriteMode: effectiveMode,
+      sectionsPath: written.sectionsPath,
+      patchPath: written.patchPath,
     };
   }
 
@@ -180,7 +217,12 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
   }
   writeCard(ws, card);
 
-  const written = writeRun(ws, run, [candidate], { diff, scores });
+  const written = writeRun(ws, run, [candidate], {
+    diff,
+    scores,
+    sections: sectionArtifact,
+    patch: rewritten.patch,
+  });
   if (!written.diffPath) {
     throw new Error("R0 failed to write a unified diff");
   }
@@ -198,13 +240,22 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
     table: rows.length > 0 ? formatScoreTable(rows) : undefined,
     message: decision.message,
     llmTarget,
+    rewriteMode: effectiveMode,
+    sectionsPath: written.sectionsPath,
+    patchPath: written.patchPath,
   };
 }
 
-function runDryStub(ws: Workspace, card: PromptCard, baseline: PromptVersion): RunR0Result {
+function runDryStub(
+  ws: Workspace,
+  card: PromptCard,
+  baseline: PromptVersion,
+  options: RunR0Options,
+): RunR0Result {
+  const patched = dryRunPatch(baseline.system_prompt, "[R0 dry-run stub]");
   const version: PromptVersion = {
     id: newId("ver"),
-    system_prompt: baseline.system_prompt,
+    system_prompt: patched.prompt,
     hypothesis: "stub",
     is_baseline: false,
     promoted: false,
@@ -228,7 +279,24 @@ function runDryStub(ws: Workspace, card: PromptCard, baseline: PromptVersion): R
   card.status = "optimizing";
   writeCard(ws, card);
   const diff = unifiedPromptDiff(baseline.system_prompt, version.system_prompt);
-  const written = writeRun(ws, run, [candidate], { diff });
+  const effectiveMode = resolveEffectiveRewriteMode(
+    options.rewriteMode ?? "auto",
+    baseline.system_prompt,
+    resolvePatchThreshold(),
+  );
+  const written = writeRun(ws, run, [candidate], {
+    diff,
+    sections: sectionMapArtifact({
+      sections: patched.sections,
+      rewriteMode: options.rewriteMode ?? "auto",
+      effectiveMode,
+      maxPatchRatio: resolveMaxPatchRatio(options.maxPatchRatio, "R0"),
+      allowFullRewrite: resolveAllowFullRewrite(options.allowFullRewrite, "R0", effectiveMode),
+      usedFallback: false,
+      sourceChars: baseline.system_prompt.length,
+    }),
+    patch: { hypothesis: "stub", edits: patched.edits, kind: "edits" },
+  });
   if (!written.diffPath) {
     throw new Error("R0 stub failed to write a unified diff");
   }
@@ -244,5 +312,8 @@ function runDryStub(ws: Workspace, card: PromptCard, baseline: PromptVersion): R
     dryRun: true,
     message: "R0 dry-run stub (no LLM calls).",
     llmTarget: llm ? llmTargetLine(llm) : undefined,
+    rewriteMode: effectiveMode,
+    sectionsPath: written.sectionsPath,
+    patchPath: written.patchPath,
   };
 }

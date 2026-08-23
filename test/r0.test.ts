@@ -237,6 +237,116 @@ cases:
     expect(result.message).toMatch(/--no-eval/);
   });
 
+  it("applies structured edits on a multi-section prompt instead of a full rewrite", async () => {
+    setLlmEnv();
+    const root = mkdtempSync(join(tmpdir(), "spl-r0-patch-"));
+    const system = `# Role
+You are a support agent.
+
+# Rules
+Never invent order details.
+
+# Style
+Be brief.
+`;
+    writeMiniCard(
+      root,
+      system,
+      `
+id: mini
+name: mini
+metric:
+  id: string_contains
+  kind: custom
+  returns_feedback: false
+splits:
+  train: [t1]
+  val: [v1]
+cases:
+  - id: t1
+    input: { user: "train" }
+    gold: good
+  - id: v1
+    input: { user: "val" }
+    gold: good
+`,
+    );
+
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      const systemMsg = String(body.messages[0]?.content ?? "");
+      if (systemMsg.includes("Sysprompt Lab")) {
+        return completion(
+          JSON.stringify({
+            hypothesis: "Ask the model to say good",
+            edits: [
+              {
+                op: "replace_section",
+                section_id: "s3",
+                content: "# Style\nIMPROVED: always reply with good.\n",
+              },
+            ],
+          }),
+        );
+      }
+      if (systemMsg.includes("IMPROVED")) {
+        return completion("this is good");
+      }
+      return completion("nope");
+    };
+
+    const result = await runR0("mini", { root, fetch: fetchMock, rewriteMode: "patch" });
+    expect(result.rewriteMode).toBe("patch");
+    expect(result.version.system_prompt).toContain("You are a support agent");
+    expect(result.version.system_prompt).toContain("Never invent order details");
+    expect(result.version.system_prompt).toContain("IMPROVED");
+    expect(result.version.system_prompt).not.toBe("Always say hello to the user.");
+    expect(result.promoted).toBe(true);
+    expect(result.sectionsPath).toBeDefined();
+    const sections = JSON.parse(readFileSync(result.sectionsPath!, "utf8")) as {
+      sections: Array<{ id: string }>;
+      effective_mode: string;
+    };
+    expect(sections.effective_mode).toBe("patch");
+    expect(sections.sections.map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
+  });
+
+  it("rejects an oversized patch and falls back to a full rewrite when allowed", async () => {
+    setLlmEnv();
+    const root = mkdtempSync(join(tmpdir(), "spl-r0-oversize-"));
+    const dir = join(root, "prompt");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "system.md"), "# Role\nKeep the original handbook.\n", "utf8");
+    ingest(dir, { root, id: "mini" });
+
+    let rewriteCalls = 0;
+    const fetchMock: typeof fetch = async () => {
+      rewriteCalls += 1;
+      if (rewriteCalls <= 2) {
+        return completion(
+          JSON.stringify({
+            hypothesis: "Replace everything",
+            edits: [{ op: "replace_section", section_id: "s1", content: "UNRELATED full rewrite of the handbook." }],
+          }),
+        );
+      }
+      return completion(
+        JSON.stringify({ hypothesis: "Legacy full rewrite", system_prompt: "New prompt after fallback." }),
+      );
+    };
+
+    const result = await runR0("mini", {
+      root,
+      noEval: true,
+      fetch: fetchMock,
+      rewriteMode: "patch",
+      maxPatchRatio: 0.2,
+      allowFullRewrite: true,
+    });
+    expect(rewriteCalls).toBe(3);
+    expect(result.version.system_prompt).toBe("New prompt after fallback.");
+  });
+
   it("throws when env is missing and this is not a dry-run", async () => {
     for (const key of KEYS) {
       delete process.env[key];

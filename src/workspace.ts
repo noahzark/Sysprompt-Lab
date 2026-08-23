@@ -107,6 +107,8 @@ export function writeRun(
     scores?: Score[];
     candidatesJsonl?: unknown[];
     summary?: string;
+    sections?: unknown;
+    patch?: unknown;
   },
 ): {
   dir: string;
@@ -116,6 +118,8 @@ export function writeRun(
   scoresPath?: string;
   candidatesJsonlPath?: string;
   summaryPath?: string;
+  sectionsPath?: string;
+  patchPath?: string;
 } {
   ensureWorkspace(ws);
   const dir = runDir(ws, run.id);
@@ -154,7 +158,27 @@ export function writeRun(
       "utf8",
     );
   }
-  return { dir, runPath, candidatesPath, diffPath, scoresPath, candidatesJsonlPath, summaryPath };
+  let sectionsPath: string | undefined;
+  if (extra?.sections !== undefined) {
+    sectionsPath = join(dir, "sections.json");
+    writeJson(sectionsPath, extra.sections);
+  }
+  let patchPath: string | undefined;
+  if (extra?.patch !== undefined) {
+    patchPath = join(dir, "patch.json");
+    writeJson(patchPath, extra.patch);
+  }
+  return {
+    dir,
+    runPath,
+    candidatesPath,
+    diffPath,
+    scoresPath,
+    candidatesJsonlPath,
+    summaryPath,
+    sectionsPath,
+    patchPath,
+  };
 }
 
 export function loadCardFromFile(path: string): PromptCard {

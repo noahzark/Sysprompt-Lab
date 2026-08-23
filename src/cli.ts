@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { bind, exportCard, ingest, promoteVersion, runR0, runR1, runR2 } from "./commands.js";
 import { formatLlmTarget, loadEnvFiles, peekRootFlag, readLlmConfig } from "./env.js";
+import { parseMaxPatchRatio, parseRewriteMode } from "./patch.js";
 import { loadCardFromFile, loadSuiteFromFile } from "./workspace.js";
 
 loadEnvFiles({ cwd: process.cwd(), root: peekRootFlag() });
@@ -59,6 +60,16 @@ program
     "--budget <value>",
     "R1: max candidate evals (int, default rounds×candidates, or SYSPROMPT_R1_BUDGET). R2: light|medium|heavy or max metric calls (default light, or SYSPROMPT_R2_BUDGET)",
   )
+  .option(
+    "--rewrite-mode <mode>",
+    "R0/R1: patch | full | auto (default auto: patch when the prompt is ≥ 1500 chars)",
+  )
+  .option(
+    "--max-patch-ratio <n>",
+    "R0/R1: reject patches that change more than this fraction of characters (R0 0.8, R1 0.5)",
+  )
+  .option("--allow-full-rewrite", "R0/R1: fall back to a full rewrite if the patch cannot be applied")
+  .option("--no-allow-full-rewrite", "R0/R1: do not fall back to a full rewrite")
   .action(
     async (
       card: string,
@@ -70,6 +81,8 @@ program
         candidates?: string;
         passStreak?: string;
         budget?: string;
+        rewriteMode?: string;
+        maxPatchRatio?: string;
       },
     ) => {
       const rung = opts.rung.toUpperCase();
@@ -78,8 +91,18 @@ program
       }
       const dryRun = Boolean(opts.dryRun);
       const noEval = opts.eval === false;
+      const rewriteMode = parseRewriteMode(opts.rewriteMode);
+      const maxPatchRatio = parseMaxPatchRatio(opts.maxPatchRatio);
+      const allowFullRewrite = peekAllowFullRewrite();
       if (rung === "R0") {
-        const result = await runR0(card, { root: rootOpt(), dryRun, noEval });
+        const result = await runR0(card, {
+          root: rootOpt(),
+          dryRun,
+          noEval,
+          rewriteMode,
+          maxPatchRatio,
+          allowFullRewrite,
+        });
         if (result.dryRun) {
           console.log(`R0 stub ${result.run.id}: candidate ${result.candidate.id} (hypothesis=stub)`);
           console.log(`diff → ${result.diffPath}`);
@@ -151,6 +174,9 @@ program
         candidates: parseOptionalInt(opts.candidates, "--candidates"),
         passStreak: parseOptionalInt(opts.passStreak, "--pass-streak"),
         budget: parseOptionalInt(opts.budget, "--budget"),
+        rewriteMode,
+        maxPatchRatio,
+        allowFullRewrite,
       });
       if (result.dryRun) {
         console.log(
@@ -215,6 +241,16 @@ program
 
 function rootOpt(): string | undefined {
   return program.opts<{ root?: string }>().root;
+}
+
+function peekAllowFullRewrite(argv: string[] = process.argv): boolean | undefined {
+  if (argv.includes("--allow-full-rewrite")) {
+    return true;
+  }
+  if (argv.includes("--no-allow-full-rewrite")) {
+    return false;
+  }
+  return undefined;
 }
 
 function parseOptionalInt(value: string | undefined, label: string): number | undefined {

@@ -32,7 +32,7 @@ npm run sysprompt -- run support-bot --rung R0
 npm run sysprompt -- export support-bot
 ```
 
-That rewrites the system prompt, writes `.spl/runs/<id>/r0.diff` plus `scores.json`, and prints train/val quality (and latency). Auto-promote happens only if **val** mean quality strictly rises. To accept a candidate yourself:
+That rewrites the system prompt (or, for long prompts, applies a structured patch), writes `.spl/runs/<id>/r0.diff` plus `scores.json`, and prints train/val quality (and latency). Auto-promote happens only if **val** mean quality strictly rises. To accept a candidate yourself:
 
 ```bash
 npm run sysprompt -- promote support-bot
@@ -55,7 +55,7 @@ npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
 npm run sysprompt -- run support-bot --rung R1
 ```
 
-Artifacts under `.spl/runs/<id>/`: `candidates.jsonl` (every tried candidate), `scores.json`, `r1.diff` (baseline → best), `summary.md`. Auto-promote only if final val strictly beats the original baseline.
+Artifacts under `.spl/runs/<id>/`: `candidates.jsonl` (every tried candidate), `scores.json`, `sections.json` (prompt section map), `r1.diff` (baseline → best), `summary.md`. Large prompts are patched by default (`--rewrite-mode auto`); use `--rewrite-mode full` to force a complete rewrite. Auto-promote only if final val strictly beats the original baseline.
 
 Optional knobs (flags override `SYSPROMPT_R1_*`):
 

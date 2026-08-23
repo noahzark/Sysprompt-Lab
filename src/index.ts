@@ -71,10 +71,25 @@ export type {
 } from "./commands.js";
 export { chatCompletion, chatCompletionsUrl, normalizeLlmApiBase } from "./llm.js";
 export type { ChatCompletionResult, ChatMessage, FetchFn } from "./llm.js";
-export { parseRewriteResponse, rewriteSystemPrompt, shortHypothesis, stripFences } from "./rewrite.js";
+export { parseRewriteResponse, parsePatchResponse, rewriteSystemPrompt, shortHypothesis, stripFences } from "./rewrite.js";
 export { caseUserText, formatScoreTable, scoreCase } from "./eval.js";
 export { adoptDecision, promotionDecision, r1PromotionDecision } from "./promote.js";
-export { parseR1Candidates, dedupeProposals } from "./r1-rewrite.js";
+export { parseR1Candidates, parseR1RawCandidates, materializeR1Proposals, dedupeProposals } from "./r1-rewrite.js";
+export {
+  applyEdits,
+  applyUnifiedDiff,
+  applyPromptPatch,
+  assertSafePatch,
+  changedCharRatio,
+  dryRunPatch,
+  formatSectionMap,
+  parseEdits,
+  parseRewriteMode,
+  resolveEffectiveRewriteMode,
+  splitSections,
+  PatchError,
+} from "./patch.js";
+export type { PatchEdit, PromptSection, RewriteMode } from "./patch.js";
 export { resolveR1Config } from "./r1.js";
 export { parseSidecarResult, resolveR2Budget, resolvePython } from "./r2.js";
 export { sanitizeValue, selectEvidenceCases, formatEvidence } from "./r1-evidence.js";

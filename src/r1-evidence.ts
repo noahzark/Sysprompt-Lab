@@ -1,4 +1,5 @@
 import type { CaseEvalResult } from "./eval.js";
+import { type PromptSection, formatSectionMap } from "./patch.js";
 
 const SECRET_KEY =
   /^(token|password|secret|api[_-]?key|authorization|auth|bearer|credential|private[_-]?key)$/i;
@@ -86,8 +87,17 @@ function fmt(n: number): string {
   return n.toFixed(3);
 }
 
+export interface FormatEvidenceOptions {
+  rewriteMode?: "patch" | "full";
+  sections?: PromptSection[];
+}
+
 /** Structured evidence for the R1 rewriter. Train cases only (search set). */
-export function formatEvidence(pack: EvidencePack, candidateBudget: number): string {
+export function formatEvidence(
+  pack: EvidencePack,
+  candidateBudget: number,
+  options: FormatEvidenceOptions = {},
+): string {
   const valLine = pack.valMean === undefined ? "" : `\nval mean quality: ${fmt(pack.valMean)}`;
   const failBlock =
     pack.failures.length === 0
@@ -109,12 +119,21 @@ export function formatEvidence(pack: EvidencePack, candidateBudget: number): str
   const hypotheses =
     pack.hypotheses.length === 0 ? "(none yet)" : pack.hypotheses.map((h) => `- ${h}`).join("\n");
 
-  return `Propose up to ${candidateBudget} full-prompt candidates as JSON.
+  const intro =
+    options.rewriteMode === "patch"
+      ? `Propose up to ${candidateBudget} patch candidates as JSON (edits or unified diff). Do not rewrite the entire prompt; patch only what the failures implicate.`
+      : `Propose up to ${candidateBudget} full-prompt candidates as JSON.`;
+  const sectionBlock =
+    options.sections && options.sections.length > 0
+      ? `\n\n## Section map\n${formatSectionMap(options.sections)}`
+      : "";
+
+  return `${intro}
 
 ## Current system prompt
 <system_prompt>
 ${pack.currentPrompt}
-</system_prompt>
+</system_prompt>${sectionBlock}
 
 ## Train scores
 mean quality: ${fmt(pack.trainMean)}${valLine}

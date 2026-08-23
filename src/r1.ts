@@ -9,6 +9,17 @@ import {
 } from "./eval.js";
 import { formatLlmTarget, getLlmConfig, readLlmConfig, type LlmConfig } from "./env.js";
 import { type FetchFn, normalizeLlmApiBase } from "./llm.js";
+import {
+  type EffectiveRewriteMode,
+  type RewriteMode,
+  parseRewriteMode,
+  resolveAllowFullRewrite,
+  resolveEffectiveRewriteMode,
+  resolveMaxPatchRatio,
+  resolvePatchThreshold,
+  sectionMapArtifact,
+  splitSections,
+} from "./patch.js";
 import { adoptDecision, r1PromotionDecision } from "./promote.js";
 import {
   type EvidencePack,
@@ -64,6 +75,9 @@ export interface RunR1Options {
   candidates?: number;
   passStreak?: number;
   budget?: number;
+  rewriteMode?: RewriteMode;
+  maxPatchRatio?: number;
+  allowFullRewrite?: boolean;
 }
 
 export interface R1TriedCandidate {
@@ -77,6 +91,7 @@ export interface R1TriedCandidate {
   prompt: string;
   train_quality?: number;
   val_quality?: number;
+  patch?: R1Proposal["patch"];
 }
 
 export interface RunR1Result {
@@ -97,6 +112,8 @@ export interface RunR1Result {
   roundsRan: number;
   adoptedCount: number;
   config: R1LoopConfig;
+  rewriteMode?: EffectiveRewriteMode;
+  sectionsPath?: string;
 }
 
 function envInt(name: string): number | undefined {
@@ -138,6 +155,18 @@ export function resolveR1Config(options: {
 
 function llmTargetLine(config: LlmConfig): string {
   return formatLlmTarget({ ...config, apiBase: normalizeLlmApiBase(config.apiBase) });
+}
+
+function rewriteSettings(prompt: string, options: RunR1Options) {
+  const requested = options.rewriteMode ?? parseRewriteMode(process.env.SYSPROMPT_REWRITE_MODE);
+  const effective = resolveEffectiveRewriteMode(requested, prompt, resolvePatchThreshold());
+  return {
+    requested,
+    effective,
+    maxPatchRatio: resolveMaxPatchRatio(options.maxPatchRatio, "R1"),
+    allowFullRewrite: resolveAllowFullRewrite(options.allowFullRewrite, "R1", effective),
+    sections: splitSections(prompt),
+  };
 }
 
 function markPromoted(card: PromptCard, versionId: string): void {
@@ -215,17 +244,17 @@ export async function runR1(cardRef: string, options: RunR1Options = {}): Promis
   }
 
   if (options.dryRun) {
-    return runDryR1(ws, card, baseline, config);
+    return runDryR1(ws, card, baseline, config, options);
   }
 
   const llm = getLlmConfig();
   const llmTarget = llmTargetLine(llm);
 
   if (options.noEval) {
-    return runNoEvalR1(ws, card, baseline, config, llm, llmTarget, options.fetch);
+    return runNoEvalR1(ws, card, baseline, config, llm, llmTarget, options);
   }
 
-  return runEvalLoop(ws, card, baseline, suite, config, llm, llmTarget, hasVal, options.fetch);
+  return runEvalLoop(ws, card, baseline, suite, config, llm, llmTarget, hasVal, options);
 }
 
 async function runNoEvalR1(
@@ -235,8 +264,9 @@ async function runNoEvalR1(
   config: R1LoopConfig,
   llm: LlmConfig,
   llmTarget: string,
-  fetch?: FetchFn,
+  options: RunR1Options,
 ): Promise<RunR1Result> {
+  const settings = rewriteSettings(baseline.system_prompt, options);
   const pack: EvidencePack = {
     currentPrompt: baseline.system_prompt,
     trainMean: 0,
@@ -246,10 +276,21 @@ async function runNoEvalR1(
     hypotheses: [],
   };
   const proposals = dedupeProposals(
-    await proposeR1Candidates(llm, formatEvidence(pack, config.candidates), {
-      tools: card.tools,
-      fetch,
-    }),
+    await proposeR1Candidates(
+      llm,
+      formatEvidence(pack, config.candidates, {
+        rewriteMode: settings.effective,
+        sections: settings.sections,
+      }),
+      {
+        tools: card.tools,
+        fetch: options.fetch,
+        currentPrompt: baseline.system_prompt,
+        rewriteMode: settings.effective,
+        maxPatchRatio: settings.maxPatchRatio,
+        allowFullRewrite: settings.allowFullRewrite,
+      },
+    ),
     baseline.system_prompt,
     [],
     config.candidates,
@@ -295,6 +336,7 @@ async function runNoEvalR1(
       version_id: version.id,
       hypothesis: proposal.hypothesis,
       prompt: proposal.prompt,
+      patch: proposal.patch,
     });
     lastVersion = version;
   }
@@ -307,6 +349,15 @@ async function runNoEvalR1(
     diff,
     diffName: "r1.diff",
     candidatesJsonl: tried,
+    sections: sectionMapArtifact({
+      sections: settings.sections,
+      rewriteMode: settings.requested,
+      effectiveMode: settings.effective,
+      maxPatchRatio: settings.maxPatchRatio,
+      allowFullRewrite: settings.allowFullRewrite,
+      usedFallback: false,
+      sourceChars: baseline.system_prompt.length,
+    }),
     summary: buildSummary({
       runId: run.id,
       cardId: card.id,
@@ -337,6 +388,8 @@ async function runNoEvalR1(
     roundsRan: proposals.length > 0 ? 1 : 0,
     adoptedCount: 0,
     config,
+    rewriteMode: settings.effective,
+    sectionsPath: written.sectionsPath,
   };
 }
 
@@ -345,6 +398,7 @@ function runDryR1(
   card: PromptCard,
   baseline: PromptVersion,
   config: R1LoopConfig,
+  options: RunR1Options,
 ): RunR1Result {
   const run: Run = {
     id: newId("run"),
@@ -396,6 +450,7 @@ function runDryR1(
         version_id: version.id,
         hypothesis: proposal.hypothesis,
         prompt: proposal.prompt,
+        patch: proposal.patch,
       });
       lastVersion = version;
     }
@@ -406,10 +461,20 @@ function runDryR1(
   const diff = unifiedPromptDiff(baseline.system_prompt, best.system_prompt);
   const llm = readLlmConfig();
   const message = "R1 dry-run stub (fake candidates, no LLM calls).";
+  const settings = rewriteSettings(baseline.system_prompt, options);
   const written = writeRun(ws, run, candidates, {
     diff,
     diffName: "r1.diff",
     candidatesJsonl: tried,
+    sections: sectionMapArtifact({
+      sections: settings.sections,
+      rewriteMode: settings.requested,
+      effectiveMode: settings.effective,
+      maxPatchRatio: settings.maxPatchRatio,
+      allowFullRewrite: settings.allowFullRewrite,
+      usedFallback: false,
+      sourceChars: baseline.system_prompt.length,
+    }),
     summary: buildSummary({
       runId: run.id,
       cardId: card.id,
@@ -440,6 +505,8 @@ function runDryR1(
     roundsRan: rounds,
     adoptedCount: 0,
     config,
+    rewriteMode: settings.effective,
+    sectionsPath: written.sectionsPath,
   };
 }
 
@@ -452,7 +519,7 @@ async function runEvalLoop(
   llm: LlmConfig,
   llmTarget: string,
   hasVal: boolean,
-  fetch?: FetchFn,
+  options: RunR1Options,
 ): Promise<RunR1Result> {
   const run: Run = {
     id: newId("run"),
@@ -472,6 +539,8 @@ async function runEvalLoop(
   const seenPrompts = new Set<string>([promptKey(baseline.system_prompt)]);
   const history: SearchHistoryEntry[] = [];
   const hypotheses: string[] = [];
+  const fetch = options.fetch;
+  const seedSettings = rewriteSettings(baseline.system_prompt, options);
 
   const baselineTrain = await evaluatePrompt({
     config: llm,
@@ -512,6 +581,7 @@ async function runEvalLoop(
     }
 
     const trainEvidence = selectEvidenceCases(currentTrain.cases);
+    const settings = rewriteSettings(currentVersion.system_prompt, options);
     const evidence = formatEvidence(
       {
         currentPrompt: currentVersion.system_prompt,
@@ -523,9 +593,17 @@ async function runEvalLoop(
         hypotheses,
       },
       config.candidates,
+      { rewriteMode: settings.effective, sections: settings.sections },
     );
 
-    const raw = await proposeR1Candidates(llm, evidence, { tools: card.tools, fetch });
+    const raw = await proposeR1Candidates(llm, evidence, {
+      tools: card.tools,
+      fetch,
+      currentPrompt: currentVersion.system_prompt,
+      rewriteMode: settings.effective,
+      maxPatchRatio: settings.maxPatchRatio,
+      allowFullRewrite: settings.allowFullRewrite,
+    });
     const remaining = config.budget - evalsUsed;
     const proposals = dedupeProposals(raw, currentVersion.system_prompt, seenPrompts, Math.min(config.candidates, remaining));
     if (proposals.length === 0) {
@@ -599,6 +677,7 @@ async function runEvalLoop(
         prompt: proposal.prompt,
         train_quality: train.meanQuality,
         val_quality: val?.meanQuality,
+        patch: proposal.patch,
       };
       tried.push(record);
       roundTried.push({ proposal, version, candidate, train, val, record });
@@ -719,6 +798,15 @@ async function runEvalLoop(
     diffName: "r1.diff",
     scores,
     candidatesJsonl: tried,
+    sections: sectionMapArtifact({
+      sections: seedSettings.sections,
+      rewriteMode: seedSettings.requested,
+      effectiveMode: seedSettings.effective,
+      maxPatchRatio: seedSettings.maxPatchRatio,
+      allowFullRewrite: seedSettings.allowFullRewrite,
+      usedFallback: false,
+      sourceChars: baseline.system_prompt.length,
+    }),
     summary: buildSummary({
       runId: run.id,
       cardId: card.id,
@@ -752,5 +840,7 @@ async function runEvalLoop(
     roundsRan,
     adoptedCount,
     config,
+    rewriteMode: seedSettings.effective,
+    sectionsPath: written.sectionsPath,
   };
 }

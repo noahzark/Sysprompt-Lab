@@ -51,7 +51,7 @@ Steps:
 2. Baseline eval on train (and val if present) with the current baseline + LLM from `.env`
 3. For each round up to `--rounds`:
    - Build evidence: current prompt, up to ~6 train failures + ~3 successes (truncated / sanitized; no secrets), prior search history, hypotheses
-   - Rewriter returns JSON `{ candidates: [{ hypothesis, prompt }] }` — full system-prompt rewrites, preserve intent
+   - Rewriter returns JSON `{ candidates: [{ hypothesis, edits|diff }] }` on large prompts (patch mode), or `{ hypothesis, prompt }` full rewrites on tiny prompts / `--rewrite-mode full`. Preserve intent. Do not rewrite the entire prompt when patching.
    - Dedupe / drop unchanged; keep up to `--candidates`
    - Eval each candidate on train (and val if present)
    - Adopt if score rises: val must strictly rise when val exists (train is the tie-break); otherwise train must strictly rise
@@ -60,7 +60,19 @@ Steps:
 4. After the loop: write scores; auto-promote only if final val (or train if no val) strictly beats the original baseline
 5. Persist under `.spl/runs/<id>/`: `candidates.jsonl`, `scores.json`, `r1.diff` (baseline → best), optional `summary.md`
 
-`--dry-run` writes fake candidates without network. `--no-eval` rewrites once and skips the loop. R0 is unchanged.
+`--dry-run` writes fake candidates (tiny applied patches) without network. `--no-eval` rewrites once and skips the loop.
+
+## Patch mode (R0 / R1)
+
+Full-prompt rewrite degrades on multi-KB system prompts (truncation, dropped sections, noisy diffs). Default optimize path for large prompts is **patch mode**:
+
+1. Split `system_prompt` into sections (markdown headings, `Rules:`-style headers, or blank-line blocks). Persist the map as `.spl/runs/<id>/sections.json`.
+2. Ask the model for structured JSON `edits` (`replace_section` / `replace_range` / `insert_after_section` / `delete_section`) or a unified diff. Apply with `applyEdits` / `applyUnifiedDiff`.
+3. Reject patches that apply 0 hunks, empty the prompt, or change more than `--max-patch-ratio` of characters (R0 default 0.8, R1 default 0.5).
+4. One retry with the apply error; then fall back to a legacy full rewrite only if `--allow-full-rewrite` (default true on R0; false on R1 when the prompt is large / `patch`).
+5. `--rewrite-mode patch|full|auto` (default `auto`): `patch` when length ≥ 1500 chars (`SYSPROMPT_PATCH_THRESHOLD`), else `full`.
+
+R2 is unchanged: the GEPA sidecar still optimizes the whole instruction. Large-SP patch mode is R0/R1 only.
 
 ## Phase 3 — R2 wrap GEPA
 
