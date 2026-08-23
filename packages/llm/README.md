@@ -9,7 +9,9 @@ One place for “talk to a chat/completions server” and “read the three requ
 ## Public surface
 
 - `loadEnvFiles`, `getLlmConfig`, `readLlmConfig`, `formatLlmTarget`, `maskToken`, `peekRootFlag`
-- `chatCompletion`, `normalizeLlmApiBase`, `chatCompletionsUrl`
+- `chatCompletion` (text or multimodal `content`; optional `max_tokens` / `temperature`)
+- `imageFileToDataUrl` (local jpeg/png/webp → `data:` URL)
+- `normalizeLlmApiBase`, `chatCompletionsUrl`
 
 ```ts
 import { chatCompletion, getLlmConfig } from "@sysprompt-lab/llm";

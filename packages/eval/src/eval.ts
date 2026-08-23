@@ -1,6 +1,31 @@
+import { existsSync } from "node:fs";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import type { LlmConfig } from "@sysprompt-lab/llm";
-import { chatCompletion, type FetchFn } from "@sysprompt-lab/llm";
+import {
+  chatCompletion,
+  imageFileToDataUrl,
+  type ChatMessageContent,
+  type FetchFn,
+} from "@sysprompt-lab/llm";
 import type { EvalCase, EvalSuite, Metric, Score, SplitName } from "@sysprompt-lab/core";
+import { scoreNsfwSeverityTag } from "./nsfw.js";
+
+export const DEFAULT_IMAGE_USER_TEXT = "请分析这张照片，并按系统要求仅返回 JSON。";
+export const IMAGE_DIR_ENV = "SYSPROMPT_IMAGE_DIR";
+
+export function caseHasImage(input: Record<string, unknown>): boolean {
+  return caseImageRef(input) !== undefined;
+}
+
+export function caseImageRef(input: Record<string, unknown>): string | undefined {
+  for (const key of ["image", "image_path"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
 
 export function caseUserText(input: Record<string, unknown>): string {
   for (const key of ["user", "message", "query", "text", "prompt"]) {
@@ -8,6 +33,9 @@ export function caseUserText(input: Record<string, unknown>): string {
     if (typeof value === "string" && value.length > 0) {
       return value;
     }
+  }
+  if (caseHasImage(input)) {
+    return DEFAULT_IMAGE_USER_TEXT;
   }
   return JSON.stringify(input);
 }
@@ -17,6 +45,70 @@ export function goldText(gold: unknown): string {
     return gold;
   }
   return JSON.stringify(gold);
+}
+
+export interface ImageResolveOptions {
+  /** Preferred image root (CLI / card.source / SYSPROMPT_IMAGE_DIR). */
+  imageDir?: string;
+  /** Directory of the suite file; `input.image` may be relative to it. */
+  suiteDir?: string;
+}
+
+/**
+ * Resolve `input.image` / `input.image_path` against SYSPROMPT_IMAGE_DIR,
+ * an explicit imageDir, the suite file directory, then cwd.
+ */
+export function resolveImagePath(ref: string, options: ImageResolveOptions = {}): string {
+  if (isAbsolute(ref) && existsSync(ref)) {
+    return ref;
+  }
+  const envDir = process.env[IMAGE_DIR_ENV]?.trim();
+  const roots = [options.imageDir, envDir, options.suiteDir, process.cwd()].filter(
+    (dir): dir is string => Boolean(dir),
+  );
+  const tried: string[] = [];
+  for (const root of roots) {
+    const resolvedRoot = isAbsolute(root) ? root : resolve(process.cwd(), root);
+    for (const candidate of [
+      join(resolvedRoot, ref),
+      join(resolvedRoot, basename(ref)),
+      join(resolvedRoot, "images", basename(ref)),
+    ]) {
+      tried.push(candidate);
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  if (isAbsolute(ref)) {
+    tried.unshift(ref);
+  }
+  throw new Error(
+    `Image not found: ${ref}. Copy the file next to the suite or set ${IMAGE_DIR_ENV}. Tried: ${tried.join(", ")}`,
+  );
+}
+
+function imageUrlForRef(ref: string, options: ImageResolveOptions): string {
+  if (ref.startsWith("data:") || /^https?:\/\//i.test(ref)) {
+    return ref;
+  }
+  return imageFileToDataUrl(resolveImagePath(ref, options));
+}
+
+/** Build OpenAI-compatible user content (text, or text + image_url). */
+export function caseUserContent(
+  input: Record<string, unknown>,
+  options: ImageResolveOptions = {},
+): ChatMessageContent {
+  const text = caseUserText(input);
+  const imageRef = caseImageRef(input);
+  if (!imageRef) {
+    return text;
+  }
+  return [
+    { type: "text", text },
+    { type: "image_url", image_url: { url: imageUrlForRef(imageRef, options) } },
+  ];
 }
 
 export function scoreCase(
@@ -31,6 +123,9 @@ export function scoreCase(
   }
   if (gold === undefined || gold === null) {
     return { quality: 0, note: "no gold" };
+  }
+  if (metric.kind === "custom" && metric.id === "nsfw_severity_tag") {
+    return scoreNsfwSeverityTag(output, gold);
   }
   const expected = goldText(gold);
   if (metric.kind === "exact") {
@@ -78,15 +173,42 @@ export interface SplitEval {
   cases: CaseEvalResult[];
 }
 
-export async function evaluatePrompt(options: {
+export interface EvaluatePromptOptions {
   config: LlmConfig;
   systemPrompt: string;
   versionId: string;
   suite: EvalSuite;
   split: SplitName;
   fetch?: FetchFn;
-}): Promise<SplitEval> {
+  /** Student sampling. Defaults: suite.temperature ?? 0; suite.max_tokens if set. */
+  temperature?: number;
+  max_tokens?: number;
+  imageDir?: string;
+  suiteDir?: string;
+}
+
+export function resolveEvalSampling(
+  suite: EvalSuite,
+  overrides: { temperature?: number; max_tokens?: number } = {},
+): { temperature: number; max_tokens?: number } {
+  const temperature = overrides.temperature ?? suite.temperature ?? 0;
+  const raw = overrides.max_tokens ?? suite.max_tokens;
+  return {
+    temperature,
+    max_tokens: raw !== undefined && raw > 0 ? raw : undefined,
+  };
+}
+
+export async function evaluatePrompt(options: EvaluatePromptOptions): Promise<SplitEval> {
   const cases = casesForSplit(options.suite, options.split);
+  const sampling = resolveEvalSampling(options.suite, {
+    temperature: options.temperature,
+    max_tokens: options.max_tokens,
+  });
+  const imageOpts: ImageResolveOptions = {
+    imageDir: options.imageDir,
+    suiteDir: options.suiteDir,
+  };
   const scores: Score[] = [];
   const caseResults: CaseEvalResult[] = [];
   for (const evalCase of cases) {
@@ -94,9 +216,9 @@ export async function evaluatePrompt(options: {
       options.config,
       [
         { role: "system", content: options.systemPrompt },
-        { role: "user", content: caseUserText(evalCase.input) },
+        { role: "user", content: caseUserContent(evalCase.input, imageOpts) },
       ],
-      { temperature: 0, fetch: options.fetch },
+      { temperature: sampling.temperature, max_tokens: sampling.max_tokens, fetch: options.fetch },
     );
     const { quality, note } = scoreCase(options.suite.metric, result.content, evalCase.gold);
     scores.push({

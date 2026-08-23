@@ -8,5 +8,21 @@ export {
   readLlmConfig,
 } from "./env.js";
 export type { LlmConfig, LoadEnvOptions } from "./env.js";
-export { chatCompletion, chatCompletionsUrl, normalizeLlmApiBase } from "./llm.js";
-export type { ChatCompletionOptions, ChatCompletionResult, ChatMessage, FetchFn } from "./llm.js";
+export {
+  chatCompletion,
+  chatCompletionsUrl,
+  imageFileToDataUrl,
+  imageMimeFromBytes,
+  imageMimeFromPath,
+  normalizeLlmApiBase,
+} from "./llm.js";
+export type {
+  ChatCompletionOptions,
+  ChatCompletionResult,
+  ChatContentPart,
+  ChatImageUrlPart,
+  ChatMessage,
+  ChatMessageContent,
+  ChatTextPart,
+  FetchFn,
+} from "./llm.js";

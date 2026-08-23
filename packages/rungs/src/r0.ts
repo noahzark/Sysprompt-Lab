@@ -40,6 +40,10 @@ export interface RunR0Options {
   rewriteMode?: RewriteMode;
   maxPatchRatio?: number;
   allowFullRewrite?: boolean;
+  /** Student eval sampling (rewriter stays colder). CLI / suite.temperature override default 0. */
+  temperature?: number;
+  maxTokens?: number;
+  imageDir?: string;
 }
 
 export interface RunR0Result {
@@ -62,6 +66,16 @@ export interface RunR0Result {
 
 function llmTargetLine(config: LlmConfig): string {
   return formatLlmTarget({ ...config, apiBase: normalizeLlmApiBase(config.apiBase) });
+}
+
+function studentEvalExtras(card: PromptCard, options: RunR0Options) {
+  const envDir = process.env.SYSPROMPT_IMAGE_DIR?.trim();
+  return {
+    fetch: options.fetch,
+    temperature: options.temperature,
+    max_tokens: options.maxTokens,
+    imageDir: options.imageDir ?? (envDir || card.source),
+  };
 }
 
 function markPromoted(card: PromptCard, versionId: string): void {
@@ -171,13 +185,14 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
   let valCandidate: number | undefined;
 
   for (const split of splits) {
+    const extras = studentEvalExtras(card, options);
     const baselineEval = await evaluatePrompt({
       config,
       systemPrompt: baseline.system_prompt,
       versionId: baseline.id,
       suite,
       split,
-      fetch: options.fetch,
+      ...extras,
     });
     const candidateEval = await evaluatePrompt({
       config,
@@ -185,7 +200,7 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
       versionId: version.id,
       suite,
       split,
-      fetch: options.fetch,
+      ...extras,
     });
     scores.push(
       ...baselineEval.scores,

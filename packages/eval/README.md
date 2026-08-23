@@ -8,7 +8,9 @@ Same-metric verify. Optimization packages propose a new `system_prompt`; this pa
 
 ## Public surface
 
-- Execution: `evaluatePrompt`, `casesForSplit`, `scoreCase`, `caseUserText`
+- Execution: `evaluatePrompt`, `casesForSplit`, `scoreCase`, `caseUserText`, `caseUserContent`
+- Vision cases: `input.image` / `input.image_path` → multimodal user content (`text` + `image_url` data URL). Paths resolve relative to the suite file, `card.source`, or `SYSPROMPT_IMAGE_DIR`.
+- Custom metric `id: nsfw_severity_tag` (kind `custom`): parse JSON `tags[]`, exact-match the single NSFW severity label.
 - Aggregation: `mean`, `aggregateScore`, `formatScoreTable`
 - Gate: `promotionDecision` (R0), `adoptDecision` (R1 mid-loop), `r1PromotionDecision` (R1/R2 end-of-loop)
 

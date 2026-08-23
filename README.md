@@ -124,8 +124,12 @@ Flags:
 | `--rewrite-mode <mode>` | R0/R1: `patch` \| `full` \| `auto` (default `auto`). `auto` uses `patch` when the prompt is ≥ 1500 chars (`SYSPROMPT_PATCH_THRESHOLD`), else `full` |
 | `--max-patch-ratio <n>` | R0/R1: reject a patch that changes more than this fraction of characters (default `0.8` on R0, `0.5` on R1) |
 | `--allow-full-rewrite` / `--no-allow-full-rewrite` | If a patch cannot be applied, retry once, then optionally fall back to a full rewrite. Default: on for R0; off for R1 on large/`patch` prompts |
+| `--temperature <n>` | R0/R1 **student** eval temperature (default `0`, or `suite.temperature`). Rewriter stays colder |
+| `--max-tokens <n>` | R0/R1 **student** eval `max_tokens` (omit by default, or `suite.max_tokens`) |
 
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
+
+Vision cases are supported in the framework (`input.image` / `input.image_path`, student `--temperature` / `--max-tokens`, custom metric `nsfw_severity_tag`) but **do not commit** image binaries or a real tagging bench. Keep the suite and files on your machine; point images at a local directory or `SYSPROMPT_IMAGE_DIR`.
 
 ## 在哪里配置 / Where to configure
 

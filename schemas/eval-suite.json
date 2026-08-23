@@ -120,6 +120,13 @@
         "val"
       ],
       "additionalProperties": false
+    },
+    "temperature": {
+      "type": "number"
+    },
+    "max_tokens": {
+      "type": "integer",
+      "minimum": 0
     }
   },
   "required": [

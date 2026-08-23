@@ -85,6 +85,31 @@ describe("example files", () => {
     expect(validate(suite), JSON.stringify(validate.errors)).toBe(true);
   });
 
+  it("accepts optional student sampling and a vision case shape", () => {
+    const suite = normalizeSuite({
+      id: "vision-shape",
+      name: "vision-shape",
+      temperature: 1,
+      max_tokens: 4096,
+      metric: { id: "nsfw_severity_tag", kind: "custom", returns_feedback: true },
+      splits: { train: ["c1"], val: [] },
+      cases: [
+        {
+          id: "c1",
+          input: { image: "images/fixture.png", user: "look" },
+          gold: { severity: "性感" },
+        },
+      ],
+    });
+    expect(suite.temperature).toBe(1);
+    expect(suite.max_tokens).toBe(4096);
+    expect(suite.cases[0]?.input.image).toBe("images/fixture.png");
+
+    const ajv = new Ajv({ allErrors: true, strict: false });
+    const validate = ajv.compile(jsonSchemaFor("eval-suite"));
+    expect(validate(suite), JSON.stringify(validate.errors)).toBe(true);
+  });
+
   it("accepts YAML split shorthand and rejects unknown case ids", () => {
     const suite = normalizeSuite({
       id: "tiny",

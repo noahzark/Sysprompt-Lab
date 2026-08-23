@@ -78,6 +78,10 @@ export interface RunR1Options {
   rewriteMode?: RewriteMode;
   maxPatchRatio?: number;
   allowFullRewrite?: boolean;
+  /** Student eval sampling (rewriter stays colder). CLI / suite.temperature override default 0. */
+  temperature?: number;
+  maxTokens?: number;
+  imageDir?: string;
 }
 
 export interface R1TriedCandidate {
@@ -155,6 +159,16 @@ export function resolveR1Config(options: {
 
 function llmTargetLine(config: LlmConfig): string {
   return formatLlmTarget({ ...config, apiBase: normalizeLlmApiBase(config.apiBase) });
+}
+
+function studentEvalExtras(card: PromptCard, options: RunR1Options) {
+  const envDir = process.env.SYSPROMPT_IMAGE_DIR?.trim();
+  return {
+    fetch: options.fetch,
+    temperature: options.temperature,
+    max_tokens: options.maxTokens,
+    imageDir: options.imageDir ?? (envDir || card.source),
+  };
 }
 
 function rewriteSettings(prompt: string, options: RunR1Options) {
@@ -541,6 +555,7 @@ async function runEvalLoop(
   const hypotheses: string[] = [];
   const fetch = options.fetch;
   const seedSettings = rewriteSettings(baseline.system_prompt, options);
+  const extras = studentEvalExtras(card, options);
 
   const baselineTrain = await evaluatePrompt({
     config: llm,
@@ -548,7 +563,7 @@ async function runEvalLoop(
     versionId: baseline.id,
     suite,
     split: "train",
-    fetch,
+    ...extras,
   });
   scores.push(...collectScores(baselineTrain, baseline.id, llm.model, suite.metric.id));
   let baselineVal: SplitEval | undefined;
@@ -559,7 +574,7 @@ async function runEvalLoop(
       versionId: baseline.id,
       suite,
       split: "val",
-      fetch,
+      ...extras,
     });
     scores.push(...collectScores(baselineVal, baseline.id, llm.model, suite.metric.id));
   }
@@ -649,7 +664,7 @@ async function runEvalLoop(
         versionId: version.id,
         suite,
         split: "train",
-        fetch,
+        ...extras,
       });
       evalsUsed += 1;
       scores.push(...collectScores(train, version.id, llm.model, suite.metric.id));
@@ -661,7 +676,7 @@ async function runEvalLoop(
           versionId: version.id,
           suite,
           split: "val",
-          fetch,
+          ...extras,
         });
         scores.push(...collectScores(val, version.id, llm.model, suite.metric.id));
       }
