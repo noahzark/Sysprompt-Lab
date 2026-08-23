@@ -79,10 +79,10 @@ describe("CLI ingest → bind → export", () => {
 });
 
 describe("Phase 1 R0 stub", () => {
-  it("copies baseline to a stub candidate and writes a unified diff", () => {
+  it("copies baseline to a stub candidate and writes a unified diff", async () => {
     const root = mkdtempSync(join(tmpdir(), "spl-r0-"));
     ingest(example, { root });
-    const result = runR0("support-bot", { root });
+    const result = await runR0("support-bot", { root, dryRun: true });
     expect(result.version.hypothesis).toBe("stub");
     expect(result.version.is_baseline).toBe(false);
     expect(result.version.parent).toBe(result.card.versions[0]?.id);
@@ -97,21 +97,22 @@ describe("Phase 1 R0 stub", () => {
     expect(run.card_id).toBe("support-bot");
   });
 
-  it("CLI rejects R1/R2 and accepts R0 without network", () => {
+  it("CLI rejects R1/R2 and accepts R0 --dry-run without network", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-r0-cli-"));
     runCli(root, ["ingest", example]);
     expect(() => runCli(root, ["run", "support-bot", "--rung", "R1"])).toThrow(/not implemented/);
-    const out = runCli(root, ["run", "support-bot", "--rung", "R0"]);
+    expect(() => runCli(root, ["run", "support-bot", "--rung", "R2"])).toThrow(/not implemented/);
+    const out = runCli(root, ["run", "support-bot", "--rung", "R0", "--dry-run"]);
     expect(out).toMatch(/R0 stub/);
     expect(out).toMatch(/hypothesis=stub/);
     expect(out).toMatch(/LLM config not set|LLM \(unused in stub\)/);
   });
 
-  it("prints masked LLM base/model when env is set, without requiring a network call", () => {
+  it("prints masked LLM base/model on --dry-run when env is set, without a network call", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-r0-llm-"));
     runCli(root, ["ingest", example]);
     const token = "sk-super-secret-token";
-    const out = runCli(root, ["run", "support-bot", "--rung", "R0"], {
+    const out = runCli(root, ["run", "support-bot", "--rung", "R0", "--dry-run"], {
       LLM_API_BASE: "https://api.openai.com/v1",
       LLM_API_MODEL: "gpt-4o-mini",
       LLM_API_TOKEN: token,
@@ -119,5 +120,17 @@ describe("Phase 1 R0 stub", () => {
     expect(out).toMatch(/gpt-4o-mini @ https:\/\/api\.openai\.com\/v1/);
     expect(out).toContain("token sk-…en");
     expect(out).not.toContain(token);
+  });
+
+  it("CLI errors clearly when R0 needs the network but env is missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "spl-r0-missing-"));
+    runCli(root, ["ingest", example]);
+    expect(() =>
+      runCli(root, ["run", "support-bot", "--rung", "R0"], {
+        LLM_API_BASE: "",
+        LLM_API_MODEL: "",
+        LLM_API_TOKEN: "",
+      }),
+    ).toThrow(/LLM_API_/);
   });
 });

@@ -102,6 +102,8 @@ export const ScoreSchema = z.object({
   split: SplitNameSchema,
   model_id: z.string().min(1),
   metric_id: z.string().min(1),
+  version_id: z.string().min(1).optional(),
+  case_id: z.string().min(1).optional(),
 });
 
 export type CardStatus = z.infer<typeof CardStatusSchema>;

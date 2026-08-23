@@ -28,9 +28,13 @@ Ship the contracts and a round-trip that needs no network:
 
 ## Phase 1 — R0 rewrite
 
-Meta-prompt rewrite of the baseline, unified diff, human accept.
+Meta-prompt rewrite of the baseline, unified diff, same-suite eval, promote only if val improves.
 
-This repository starts Phase 1 with a **stub only**: `run --rung R0` copies the baseline to a candidate (`hypothesis: stub`) and writes a diff. No LLM calls.
+- OpenAI-compatible client: `POST {LLM_API_BASE}/v1/chat/completions` (`/v1` appended when missing)
+- `run --rung R0` rewrites the system prompt, writes `.spl/runs/<id>/r0.diff`, scores train (and val if present)
+- Auto-promote only when val mean quality strictly rises; train-only suites refuse auto-promote
+- `--dry-run` keeps the Phase 0 stub (no network); `--no-eval` rewrites only
+- Human accept: `promote <card> [version]` then `export`
 
 ## Phase 2 — R1 eval-loop and R2 wrap GEPA
 

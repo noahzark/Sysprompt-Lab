@@ -39,7 +39,9 @@ npm run sysprompt -- --help
 
 After `npm run build`, the bins are `sysprompt` and `spl` (`npx sysprompt` / `npx spl` from this package).
 
-## Quickstart (offline, no API keys)
+## Quickstart
+
+Offline ingest / bind / export (no API keys):
 
 ```bash
 npm run sysprompt -- ingest examples/support-bot
@@ -47,16 +49,36 @@ npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
 npm run sysprompt -- export support-bot
 ```
 
-This reads `examples/support-bot/system.md` (+ `tools.json`), writes a card under `.spl/cards/`, attaches `suite.yaml`, then exports:
-
-- `.spl/export/support-bot/card.json`
-- `.spl/export/support-bot/system.promoted.md` (baseline until something is promoted)
-
-Phase 1 stub only — copies the baseline, writes a unified diff, does **not** call a model:
+Live R0 rewrite + before/after eval on one model. Copy `.env.example` → `.env` first:
 
 ```bash
+cp .env.example .env
+# fill LLM_API_BASE, LLM_API_MODEL, LLM_API_TOKEN
+
+npm run sysprompt -- ingest examples/support-bot
+npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
 npm run sysprompt -- run support-bot --rung R0
+npm run sysprompt -- export support-bot
 ```
+
+`run --rung R0` calls the configured OpenAI-compatible API, writes a candidate + unified diff under `.spl/runs/<id>/r0.diff`, scores **train** and **val** (if the suite has val cases) with the same metric, and auto-promotes **only** when val mean quality strictly rises. Otherwise the new version stays `promoted=false`. Train-only suites never auto-promote.
+
+Human accept without auto-promote:
+
+```bash
+npm run sysprompt -- promote support-bot            # latest non-baseline version
+npm run sysprompt -- promote support-bot ver_…      # a specific version
+npm run sysprompt -- export support-bot
+```
+
+Flags:
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | No LLM calls; copy the baseline (Phase 0 stub, used by tests) |
+| `--no-eval` | Rewrite only; skip before/after eval and auto-promote |
+
+`run --rung R1` / `R2` are rejected.
 
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 
@@ -66,27 +88,27 @@ More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 
 | 变量 | 含义 |
 |---|---|
-| `LLM_API_BASE` | OpenAI 兼容 API 根地址 |
+| `LLM_API_BASE` | OpenAI 兼容 API 根地址。若没有 `/v1` 后缀会自动补上，再 POST `{base}/chat/completions` |
 | `LLM_API_MODEL` | 模型 / API id（如 `gpt-4o-mini`、`deepseek-chat`） |
-| `LLM_API_TOKEN` | 密钥；只写在 `.env`，不要提交 |
+| `LLM_API_TOKEN` | 密钥；只写在 `.env`，不要提交。日志里只打码，不会打印原文 |
 
 ```bash
 cp .env.example .env
 ```
 
-`ingest` / `bind` / `export` 不需要这些变量。真正调模型的档位才会调用 `getLlmConfig()`。当前的 `run --rung R0` 仍是 stub：若 `.env` 已填写，只打印将使用的 base / model（token 打码），不会发请求。
+`ingest` / `bind` / `export` / `run --dry-run` 不需要这些变量。真正调模型的 `run --rung R0` 会调用 `getLlmConfig()`；缺任一变量会报错并提示复制 `.env.example`。
 
 ## Library
 
 ```ts
-import { ingest, bind, exportCard, loadCard, loadSuite } from "sysprompt-lab";
+import { ingest, bind, exportCard, runR0, promoteVersion, loadCard, loadSuite } from "sysprompt-lab";
 ```
 
 JSON Schema (draft-07) for every entity lives in [`schemas/`](schemas/). Zod sources in `src/schemas.ts` are the runtime validators and can re-emit those files (`npm run emit-schemas`).
 
 ## Status
 
-Phase 0: schemas + offline ingest / bind / export. R0 is a stub. R1 / R2 / GEPA are not implemented.
+Phase 1: schemas + offline ingest / bind / export + real R0 rewrite and before/after eval. R1 / R2 / GEPA are not implemented.
 
 ## License
 

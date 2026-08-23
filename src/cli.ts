@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { bind, exportCard, ingest, runR0 } from "./commands.js";
+import { bind, exportCard, ingest, promoteVersion, runR0 } from "./commands.js";
 import { formatLlmTarget, loadEnvFiles, peekRootFlag, readLlmConfig } from "./env.js";
 import { loadCardFromFile, loadSuiteFromFile } from "./workspace.js";
 
@@ -10,7 +10,7 @@ const program = new Command();
 
 program
   .name("sysprompt")
-  .description("Sysprompt Lab — ingest, bind, export system-prompt cards (no API keys for Phase 0)")
+  .description("Sysprompt Lab — ingest, bind, R0 rewrite + eval, export system-prompt cards")
   .version("0.1.0")
   .option("--root <dir>", "workspace root that holds .spl/ (default: cwd)");
 
@@ -47,23 +47,52 @@ program
 
 program
   .command("run")
-  .description("Optimization run. Phase 1 stub: only --rung R0 (copy baseline, write diff, no LLMs)")
+  .description("Optimization run. Phase 1: --rung R0 rewrites with an LLM and evals before/after")
   .argument("<card>", "card id or path to card JSON")
   .requiredOption("--rung <rung>", "R0 | R1 | R2")
-  .action((card: string, opts: { rung: string }) => {
+  .option("--dry-run", "No LLM calls; copy baseline (Phase 0 stub, for tests)")
+  .option("--no-eval", "Rewrite only; skip before/after eval and auto-promote")
+  .action(async (card: string, opts: { rung: string; dryRun?: boolean; eval?: boolean }) => {
     const rung = opts.rung.toUpperCase();
     if (rung !== "R0") {
-      throw new Error(`${rung} is not implemented yet. Only --rung R0 is a Phase 1 stub (no LLM calls).`);
+      throw new Error(`${rung} is not implemented yet. Only --rung R0 is available (R1/R2 are later phases).`);
     }
-    const result = runR0(card, { root: rootOpt() });
-    console.log(`R0 stub ${result.run.id}: candidate ${result.candidate.id} (hypothesis=stub)`);
+    const dryRun = Boolean(opts.dryRun);
+    const noEval = opts.eval === false;
+    const result = await runR0(card, { root: rootOpt(), dryRun, noEval });
+    if (result.dryRun) {
+      console.log(`R0 stub ${result.run.id}: candidate ${result.candidate.id} (hypothesis=stub)`);
+      console.log(`diff → ${result.diffPath}`);
+      const llm = readLlmConfig();
+      if (llm) {
+        console.log(`LLM (unused in stub) ${formatLlmTarget(llm)}`);
+      } else {
+        console.log("LLM config not set — stub does not call a model");
+      }
+      return;
+    }
+    console.log(`R0 ${result.run.id}: candidate ${result.candidate.id} (hypothesis=${result.version.hypothesis})`);
     console.log(`diff → ${result.diffPath}`);
-    const llm = readLlmConfig();
-    if (llm) {
-      console.log(`LLM (unused in stub) ${formatLlmTarget(llm)}`);
-    } else {
-      console.log("LLM config not set — stub does not call a model");
+    if (result.llmTarget) {
+      console.log(`LLM ${result.llmTarget}`);
     }
+    if (result.table) {
+      console.log(result.table);
+    }
+    if (result.scoresPath) {
+      console.log(`scores → ${result.scoresPath}`);
+    }
+    console.log(result.message);
+  });
+
+program
+  .command("promote")
+  .description("Manually mark a version as promoted (human accept)")
+  .argument("<card>", "card id or path to card JSON")
+  .argument("[version]", "version id (default: latest non-baseline candidate)")
+  .action((card: string, version?: string) => {
+    const result = promoteVersion(card, version, { root: rootOpt() });
+    console.log(`promoted ${result.card.id} version ${result.version.id} → ${result.cardPath}`);
   });
 
 program
@@ -84,10 +113,8 @@ function rootOpt(): string | undefined {
   return program.opts<{ root?: string }>().root;
 }
 
-try {
-  program.parse();
-} catch (error) {
+program.parseAsync().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
   console.error(message);
   process.exit(1);
-}
+});
