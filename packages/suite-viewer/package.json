@@ -1,12 +1,11 @@
 {
-  "name": "@sysprompt-lab/cli",
+  "name": "@sysprompt-lab/suite-viewer",
   "version": "0.1.0",
-  "description": "sysprompt / spl CLI and ingest/bind/export/promote commands.",
+  "description": "Localhost Suite Viewer WebUI for inspecting and labeling eval suites.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "sysprompt": "./src/cli.ts",
-    "spl": "./src/cli.ts"
+    "sysprompt-suite-viewer": "./src/cli.ts"
   },
   "exports": {
     ".": {
@@ -19,21 +18,20 @@
   "types": "./src/index.ts",
   "files": [
     "src",
+    "public",
     "dist",
     "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "sysprompt": "tsx src/cli.ts",
-    "spl": "tsx src/cli.ts",
+    "suite-viewer": "tsx src/cli.ts",
     "test": "vitest run"
   },
   "dependencies": {
     "@sysprompt-lab/core": "*",
+    "@sysprompt-lab/eval": "*",
     "@sysprompt-lab/llm": "*",
-    "@sysprompt-lab/rewrite": "*",
-    "@sysprompt-lab/rungs": "*",
-    "@sysprompt-lab/suite-viewer": "*",
-    "commander": "^13.1.0"
+    "commander": "^13.1.0",
+    "yaml": "^2.8.0"
   }
 }

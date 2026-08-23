@@ -11,7 +11,8 @@
       "@sysprompt-lab/eval": ["./packages/eval/src/index.ts"],
       "@sysprompt-lab/rewrite": ["./packages/rewrite/src/index.ts"],
       "@sysprompt-lab/rungs": ["./packages/rungs/src/index.ts"],
-      "@sysprompt-lab/cli": ["./packages/cli/src/index.ts"]
+      "@sysprompt-lab/cli": ["./packages/cli/src/index.ts"],
+      "@sysprompt-lab/suite-viewer": ["./packages/suite-viewer/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts"],
@@ -21,6 +22,7 @@
     { "path": "./packages/eval" },
     { "path": "./packages/rewrite" },
     { "path": "./packages/rungs" },
-    { "path": "./packages/cli" }
+    { "path": "./packages/cli" },
+    { "path": "./packages/suite-viewer" }
   ]
 }

@@ -38,6 +38,20 @@ function assertNoFullApiKey(text: string): void {
   expect(text).not.toMatch(FULL_API_KEY);
 }
 
+describe("CLI suite-viewer help", () => {
+  it("documents localhost bind, --port, and a private suite path", () => {
+    const out = execFileSync(process.execPath, ["--import", "tsx", cli, "suite-viewer", "--help"], {
+      encoding: "utf8",
+      cwd: repo,
+    });
+    expect(out).toMatch(/127\.0\.0\.1|localhost/);
+    expect(out).toMatch(/--port/);
+    expect(out).toMatch(/--image-dir/);
+    expect(out).toMatch(/private/);
+    expect(out).toMatch(/8787/);
+  });
+});
+
 describe("library ingest → bind → export", () => {
   it("round-trips the example in a temp workspace without API keys", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-lib-"));
