@@ -60,9 +60,16 @@ Steps:
 4. After the loop: write scores; auto-promote only if final val (or train if no val) strictly beats the original baseline
 5. Persist under `.spl/runs/<id>/`: `candidates.jsonl`, `scores.json`, `r1.diff` (baseline → best), optional `summary.md`
 
-`--dry-run` writes fake candidates without network. `--no-eval` rewrites once and skips the loop. R0 is unchanged. R2 stays rejected.
+`--dry-run` writes fake candidates without network. `--no-eval` rewrites once and skips the loop. R0 is unchanged.
 
 ## Phase 3 — R2 wrap GEPA
 
-- Wrap an existing GEPA implementation behind the same Card / Suite / Run types
-- Do not reimplement GEPA. Do not fork AGPL code.
+Wrap the official GEPA stack behind the same Card / Suite / Run types. Do not reimplement Pareto / merge / reflective mutation. Do not fork AGPL code.
+
+- User still works with a **literal system prompt** Card + EvalSuite (ingest-first). Internally, Card → one `system_prompt` component for `gepa.optimize`.
+- TypeScript `src/r2.ts` + CLI `--rung R2`: require bound card + train (prefer val), write a temp job dir, spawn `python -m sysprompt_gepa`, read `best_prompt` + scores + lineage, persist `.spl/runs/<id>/r2.diff`, `sidecar.json`, `scores.json`, `summary.md`.
+- Python sidecar in `python/`: adapter maps suite cases → train/val; metric returns score + synthesized feedback (exact / custom contains). Calls `gepa.optimize`. Student = `LLM_API_MODEL`; optional `LLM_REFLECTION_MODEL` (same fallback).
+- `--budget light|medium|heavy` (default light → 24 / 60 / 150 max metric calls) or a positive integer. `--dry-run` skips Python and writes a stub candidate. `--no-eval` skips auto-promote after the wrap.
+- Auto-promote uses the same helper as R1: val must strictly beat the original baseline (train-only suites may promote if train rises).
+- Never call R0/R1 "GEPA". Never log raw tokens.
+- Tests mock the sidecar / use `--dry-run`. Live install: `pip install -r python/requirements.txt` (needs network for `gepa`).

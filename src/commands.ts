@@ -19,8 +19,9 @@ import {
 } from "./workspace.js";
 import { type RunR0Options, type RunR0Result, runR0 } from "./r0.js";
 import { type RunR1Options, type RunR1Result, runR1 } from "./r1.js";
+import { type RunR2Options, type RunR2Result, runR2 } from "./r2.js";
 
-export type { RunR0Options, RunR0Result, RunR1Options, RunR1Result };
+export type { RunR0Options, RunR0Result, RunR1Options, RunR1Result, RunR2Options, RunR2Result };
 
 export interface IngestResult {
   card: PromptCard;
@@ -122,7 +123,7 @@ export function exportCard(
   return { card: exported, cardPath, promptPath };
 }
 
-export { runR0, runR1 };
+export { runR0, runR1, runR2 };
 
 export interface PromoteResult {
   card: PromptCard;

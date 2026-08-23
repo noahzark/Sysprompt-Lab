@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { bind, exportCard, ingest, promoteVersion, runR0, runR1 } from "./commands.js";
+import { bind, exportCard, ingest, promoteVersion, runR0, runR1, runR2 } from "./commands.js";
 import { formatLlmTarget, loadEnvFiles, peekRootFlag, readLlmConfig } from "./env.js";
 import { loadCardFromFile, loadSuiteFromFile } from "./workspace.js";
 
@@ -10,7 +10,7 @@ const program = new Command();
 
 program
   .name("sysprompt")
-  .description("Sysprompt Lab — ingest, bind, R0 rewrite / R1 eval-loop, export system-prompt cards")
+  .description("Sysprompt Lab — ingest, bind, R0 rewrite / R1 eval-loop / R2 GEPA wrap, export system-prompt cards")
   .version("0.1.0")
   .option("--root <dir>", "workspace root that holds .spl/ (default: cwd)");
 
@@ -47,15 +47,18 @@ program
 
 program
   .command("run")
-  .description("Optimization run. --rung R0 rewrites once; --rung R1 runs the eval loop")
+  .description("Optimization run. --rung R0 rewrites once; --rung R1 eval-loop; --rung R2 wraps GEPA")
   .argument("<card>", "card id or path to card JSON")
   .requiredOption("--rung <rung>", "R0 | R1 | R2")
-  .option("--dry-run", "No LLM calls; stub/fake candidates (for tests)")
-  .option("--no-eval", "Rewrite only; skip eval and auto-promote")
+  .option("--dry-run", "No LLM / Python GEPA calls; stub/fake candidates (for tests)")
+  .option("--no-eval", "R0/R1: rewrite only. R2: skip auto-promote after the wrap")
   .option("--rounds <n>", "R1 max search rounds (default 3, or SYSPROMPT_R1_ROUNDS)")
   .option("--candidates <n>", "R1 candidates per round (default 3, or SYSPROMPT_R1_CANDIDATES)")
   .option("--pass-streak <n>", "R1 stop after N consecutive adopts (default 1, or SYSPROMPT_R1_PASS_STREAK)")
-  .option("--budget <n>", "R1 max candidate evals (default rounds×candidates, or SYSPROMPT_R1_BUDGET)")
+  .option(
+    "--budget <value>",
+    "R1: max candidate evals (int, default rounds×candidates, or SYSPROMPT_R1_BUDGET). R2: light|medium|heavy or max metric calls (default light, or SYSPROMPT_R2_BUDGET)",
+  )
   .action(
     async (
       card: string,
@@ -70,10 +73,7 @@ program
       },
     ) => {
       const rung = opts.rung.toUpperCase();
-      if (rung === "R2") {
-        throw new Error("R2 (GEPA wrap) is not implemented yet. Use --rung R0 or --rung R1.");
-      }
-      if (rung !== "R0" && rung !== "R1") {
+      if (rung !== "R0" && rung !== "R1" && rung !== "R2") {
         throw new Error(`Unknown rung "${opts.rung}". Use R0, R1, or R2.`);
       }
       const dryRun = Boolean(opts.dryRun);
@@ -101,6 +101,43 @@ program
         }
         if (result.scoresPath) {
           console.log(`scores → ${result.scoresPath}`);
+        }
+        console.log(result.message);
+        return;
+      }
+
+      if (rung === "R2") {
+        const result = await runR2(card, {
+          root: rootOpt(),
+          dryRun,
+          noEval,
+          budget: opts.budget,
+        });
+        if (result.dryRun) {
+          console.log(`R2 dry-run ${result.run.id}: candidate ${result.version.id} (sidecar skipped)`);
+          console.log(`diff → ${result.diffPath}`);
+          const llm = readLlmConfig();
+          if (llm) {
+            console.log(`LLM (unused in stub) ${formatLlmTarget(llm)}`);
+          } else {
+            console.log("LLM config not set — stub does not call a model");
+          }
+          console.log(result.message);
+          return;
+        }
+        console.log(`R2 ${result.run.id}: candidate ${result.version.id} (budget=${result.budget.name})`);
+        console.log(`diff → ${result.diffPath}`);
+        if (result.llmTarget) {
+          console.log(`LLM ${result.llmTarget}`);
+        }
+        if (result.table) {
+          console.log(result.table);
+        }
+        if (result.scoresPath) {
+          console.log(`scores → ${result.scoresPath}`);
+        }
+        if (result.candidatesJsonlPath) {
+          console.log(`candidates → ${result.candidatesJsonlPath}`);
         }
         console.log(result.message);
         return;

@@ -73,6 +73,17 @@ npm run sysprompt -- run support-bot --rung R1
 
 R1 scores the baseline, shows the rewriter train failures + scores + history, proposes a few full-prompt candidates, evals each one on the same suite, and adopts only if the score rises (val first, train as a val-tie break; train-only if the suite has no val cases). After the loop it writes `.spl/runs/<id>/candidates.jsonl`, `scores.json`, and `r1.diff` (baseline → best). Auto-promote happens only if the **final** val (or train if there is no val) strictly beats the original baseline; otherwise the run stays unpromoted and the CLI says so.
 
+Live R2 wraps official GEPA (same `.env`, plus optional `LLM_REFLECTION_MODEL`). Install the Python sidecar first (Python 3.10+; this downloads `gepa`):
+
+```bash
+pip install -r python/requirements.txt   # or: pip install -e python/
+npm run sysprompt -- ingest examples/support-bot
+npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
+npm run sysprompt -- run support-bot --rung R2
+```
+
+`--rung R2` writes a job (seed prompt + suite cases + metric + API env), runs `python -m sysprompt_gepa` which calls `gepa.optimize`, then writes the best instruction back onto the Card. Artifacts: `.spl/runs/<id>/r2.diff`, `sidecar.json`, `scores.json`, `candidates.jsonl`, `summary.md`. Train mutates, val selects. Auto-promote uses the same gate as R1 (val must strictly beat the original baseline; train-only suites may promote if train rises). `--dry-run` skips Python and writes a stub candidate (what CI uses). `--budget light|medium|heavy` (default `light` = 24 metric calls; `medium` 60; `heavy` 150) or a positive integer. Do not call R0/R1 “GEPA”.
+
 Human accept without auto-promote:
 
 ```bash
@@ -85,14 +96,12 @@ Flags:
 
 | Flag | Effect |
 |---|---|
-| `--dry-run` | No LLM calls. R0 copies the baseline; R1 writes fake candidates (used by tests) |
-| `--no-eval` | Rewrite only; skip eval and auto-promote |
+| `--dry-run` | No LLM / Python GEPA calls. R0 copies the baseline; R1/R2 write stub candidates (used by tests) |
+| `--no-eval` | R0/R1: rewrite only. R2: skip auto-promote after the wrap |
 | `--rounds <n>` | R1 max search rounds (default `3`, or `SYSPROMPT_R1_ROUNDS`) |
 | `--candidates <n>` | R1 candidates per round (default `3`, or `SYSPROMPT_R1_CANDIDATES`) |
 | `--pass-streak <n>` | R1 stop after N consecutive adopts (default `1`, or `SYSPROMPT_R1_PASS_STREAK`) |
-| `--budget <n>` | R1 max candidate evals (default `rounds × candidates`, or `SYSPROMPT_R1_BUDGET`) |
-
-`run --rung R2` is rejected (GEPA wrap is a later phase).
+| `--budget <value>` | R1: max candidate evals (int, default `rounds × candidates`). R2: `light` / `medium` / `heavy` or max metric calls (default `light`, or `SYSPROMPT_R2_BUDGET`) |
 
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 
@@ -110,21 +119,23 @@ More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 cp .env.example .env
 ```
 
-`ingest` / `bind` / `export` / `run --dry-run` 不需要这些变量。真正调模型的 `run --rung R0` / `R1` 会调用 `getLlmConfig()`；缺任一变量会报错并提示复制 `.env.example`。
+`ingest` / `bind` / `export` / `run --dry-run` 不需要这些变量。真正调模型的 `run --rung R0` / `R1` / `R2` 会调用 `getLlmConfig()`；缺任一变量会报错并提示复制 `.env.example`。
 
 R1 循环次数也可用环境变量覆盖（命令行 flag 优先）：`SYSPROMPT_R1_ROUNDS`、`SYSPROMPT_R1_CANDIDATES`、`SYSPROMPT_R1_PASS_STREAK`、`SYSPROMPT_R1_BUDGET`。
+
+R2 还可用 `LLM_REFLECTION_MODEL`（缺省与 `LLM_API_MODEL` 相同）、`SYSPROMPT_R2_BUDGET`、`SYSPROMPT_PYTHON`。日志只打码 token，不会打印原文。
 
 ## Library
 
 ```ts
-import { ingest, bind, exportCard, runR0, runR1, promoteVersion, loadCard, loadSuite } from "sysprompt-lab";
+import { ingest, bind, exportCard, runR0, runR1, runR2, promoteVersion, loadCard, loadSuite } from "sysprompt-lab";
 ```
 
 JSON Schema (draft-07) for every entity lives in [`schemas/`](schemas/). Zod sources in `src/schemas.ts` are the runtime validators and can re-emit those files (`npm run emit-schemas`).
 
 ## Status
 
-Phase 2: schemas + offline ingest / bind / export + R0 rewrite and R1 eval-loop. R2 / GEPA are not implemented.
+Phase 3: schemas + offline ingest / bind / export + R0 rewrite, R1 eval-loop, and R2 GEPA wrap (`python -m sysprompt_gepa`). Live R2 needs `pip install -r python/requirements.txt`.
 
 ## License
 

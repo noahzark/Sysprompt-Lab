@@ -97,10 +97,12 @@ describe("Phase 1 R0 stub", () => {
     expect(run.card_id).toBe("support-bot");
   });
 
-  it("CLI rejects R2, accepts R0 --dry-run, and requires bind before R1", () => {
+  it("CLI accepts R0 --dry-run, requires bind before R1/R2, and R2 --dry-run skips Python", () => {
     const root = mkdtempSync(join(tmpdir(), "spl-r0-cli-"));
     runCli(root, ["ingest", example]);
-    expect(() => runCli(root, ["run", "support-bot", "--rung", "R2"])).toThrow(/not implemented/);
+    expect(() => runCli(root, ["run", "support-bot", "--rung", "R2", "--dry-run"])).toThrow(
+      /must be bound/,
+    );
     expect(() => runCli(root, ["run", "support-bot", "--rung", "R1", "--dry-run"])).toThrow(
       /must be bound/,
     );
@@ -108,6 +110,31 @@ describe("Phase 1 R0 stub", () => {
     expect(out).toMatch(/R0 stub/);
     expect(out).toMatch(/hypothesis=stub/);
     expect(out).toMatch(/LLM config not set|LLM \(unused in stub\)/);
+  });
+
+  it("CLI R2 --dry-run writes r2.diff without network or Python", () => {
+    const root = mkdtempSync(join(tmpdir(), "spl-r2-cli-"));
+    runCli(root, ["ingest", example]);
+    runCli(root, ["bind", "support-bot", join(example, "suite.yaml")]);
+    const out = runCli(root, ["run", "support-bot", "--rung", "R2", "--dry-run", "--budget", "light"]);
+    expect(out).toMatch(/R2 dry-run/);
+    expect(out).toMatch(/r2\.diff/);
+    expect(out).not.toContain("sk-");
+    expect(out).not.toMatch(/\bGEPA\b.*R0|\bR0\b.*GEPA/);
+  });
+
+  it("CLI R2 live path rejects a missing Python with an install hint", () => {
+    const root = mkdtempSync(join(tmpdir(), "spl-r2-nopy-"));
+    runCli(root, ["ingest", example]);
+    runCli(root, ["bind", "support-bot", join(example, "suite.yaml")]);
+    expect(() =>
+      runCli(root, ["run", "support-bot", "--rung", "R2"], {
+        LLM_API_BASE: "https://api.openai.com/v1",
+        LLM_API_MODEL: "gpt-4o-mini",
+        LLM_API_TOKEN: "sk-super-secret-token",
+        SYSPROMPT_PYTHON: "/no/such/sysprompt-python-r2",
+      }),
+    ).toThrow(/Python 3\.10\+|pip install -r python\/requirements\.txt/);
   });
 
   it("CLI R1 --dry-run writes r1.diff and candidates.jsonl without network", () => {

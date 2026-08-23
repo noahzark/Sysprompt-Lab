@@ -20,6 +20,7 @@
   "files": [
     "dist",
     "schemas",
+    "python",
     "README.md",
     "LICENSE"
   ],
@@ -29,6 +30,7 @@
     "sysprompt": "tsx src/cli.ts",
     "spl": "tsx src/cli.ts",
     "test": "vitest run",
+    "test:python": "python3 -m unittest discover -s python/tests -t python",
     "prepublishOnly": "npm run build"
   },
   "repository": {
