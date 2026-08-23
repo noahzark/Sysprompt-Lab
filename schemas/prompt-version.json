@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sysprompt.lab/schemas/prompt-version.json",
+  "title": "PromptVersion",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "system_prompt": {
+      "type": "string"
+    },
+    "hypothesis": {
+      "type": "string"
+    },
+    "is_baseline": {
+      "type": "boolean"
+    },
+    "promoted": {
+      "type": "boolean"
+    },
+    "parent": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "id",
+    "system_prompt",
+    "is_baseline",
+    "promoted"
+  ],
+  "additionalProperties": false
+}
