@@ -67,3 +67,6 @@ dist/
 
 # Sysprompt Lab local runs
 .runs/
+
+# Local vision-eval images (never commit sensitive / NSFW binaries)
+examples/image-tagger/images/

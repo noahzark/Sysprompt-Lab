@@ -79,8 +79,20 @@ export type {
   RunR2Options,
   RunR2Result,
 } from "@sysprompt-lab/cli";
-export { chatCompletion, chatCompletionsUrl, normalizeLlmApiBase } from "@sysprompt-lab/llm";
-export type { ChatCompletionResult, ChatMessage, FetchFn, LlmConfig } from "@sysprompt-lab/llm";
+export {
+  chatCompletion,
+  chatCompletionsUrl,
+  imageFileToDataUrl,
+  normalizeLlmApiBase,
+} from "@sysprompt-lab/llm";
+export type {
+  ChatCompletionResult,
+  ChatContentPart,
+  ChatMessage,
+  ChatMessageContent,
+  FetchFn,
+  LlmConfig,
+} from "@sysprompt-lab/llm";
 export {
   formatLlmTarget,
   getLlmConfig,
@@ -113,7 +125,13 @@ export {
   dedupeProposals,
 } from "@sysprompt-lab/rewrite";
 export type { PatchEdit, PromptSection, RewriteMode } from "@sysprompt-lab/rewrite";
-export { caseUserText, formatScoreTable, scoreCase } from "@sysprompt-lab/eval";
+export {
+  caseUserContent,
+  caseUserText,
+  formatScoreTable,
+  scoreCase,
+  scoreNsfwSeverityTag,
+} from "@sysprompt-lab/eval";
 export { adoptDecision, promotionDecision, r1PromotionDecision } from "@sysprompt-lab/eval";
 export { resolveR1Config, parseSidecarResult, resolveR2Budget, resolvePython } from "@sysprompt-lab/rungs";
 export { sanitizeValue, selectEvidenceCases, formatEvidence } from "@sysprompt-lab/rungs";

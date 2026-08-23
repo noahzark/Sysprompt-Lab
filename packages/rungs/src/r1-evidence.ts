@@ -78,9 +78,10 @@ function formatCase(item: CaseEvalResult, label: string, index: number): string 
   const feedback = item.evalCase.feedback
     ? `\nfeedback: ${truncateText(item.evalCase.feedback)}`
     : "";
+  const scoreNote = item.note ? `\nscorer: ${truncateText(item.note)}` : "";
   return `### ${label} ${index + 1} (${item.evalCase.id}, quality=${item.quality.toFixed(3)})
 input: ${JSON.stringify(sanitizeValue(item.evalCase.input))}
-output: ${truncateText(item.output)}${gold}${feedback}`;
+output: ${truncateText(item.output)}${gold}${feedback}${scoreNote}`;
 }
 
 function fmt(n: number): string {

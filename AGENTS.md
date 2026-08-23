@@ -32,7 +32,7 @@ Do not reimplement GEPA. Do not fork AGPL tools. Do not invent a second object m
     cli/                    # `sysprompt` / `spl` bin and commands
   python/                   # GEPA sidecar (stdin/stdout JSON job). Not a TS package
   schemas/                  # JSON Schema (draft-07) sources of truth
-  examples/                 # ingestable cards (support-bot must keep working)
+  examples/                 # ingestable cards (support-bot; image-tagger images stay out of git)
   docs/                     # product plan, not package internals
 ```
 
@@ -98,8 +98,13 @@ Optional:
 | `SYSPROMPT_R1_ROUNDS` / `SYSPROMPT_R1_CANDIDATES` / `SYSPROMPT_R1_PASS_STREAK` / `SYSPROMPT_R1_BUDGET` | R1 loop knobs (CLI flags win) |
 | `SYSPROMPT_REWRITE_MODE` | `patch` / `full` / `auto` |
 | `SYSPROMPT_PATCH_THRESHOLD` | `auto` uses patch when prompt length ≥ this (default **1500** chars) |
+| `SYSPROMPT_IMAGE_DIR` | Directory of local images for multimodal eval (`input.image` / `input.image_path`) |
 
 `ingest` / `bind` / `export` / `validate` / `run --dry-run` must work with no LLM env.
+
+## Multimodal eval
+
+Cases may set `input.image` or `input.image_path`. The student request is system + user text + an OpenAI-compatible `image_url` (local jpeg/png/webp → data URL). Paths resolve relative to the suite file, the card ingest dir, or `SYSPROMPT_IMAGE_DIR`. **Never commit sensitive image binaries** (see `examples/image-tagger/`). R0/R1 rewrite stays text; put `got X want Y` in the scorer note. R2 / GEPA is not vision-aware.
 
 ## Promote gate
 
@@ -129,6 +134,7 @@ Behavioral contract — keep these defaults unless a flag/env overrides them:
 - `npm run test:python` covers sidecar metric helpers without downloading `gepa`.
 - Never commit secrets, `.env`, or `.spl/` workspace artifacts.
 - Keep `examples/support-bot` ingest → bind → export working from the repo root.
+- Keep `examples/image-tagger` ingest → bind → validate working without images. Never commit NSFW binaries.
 
 ## PR hygiene
 

@@ -138,7 +138,7 @@ describe("evidence sanitization", () => {
       gold: "good",
     };
     const cases: CaseEvalResult[] = [
-      { evalCase, output: "nope", quality: 0, latency_ms: 1 },
+      { evalCase, output: "nope", quality: 0, note: "got 性感 want 软色情", latency_ms: 1 },
       { evalCase: { ...evalCase, id: "t2" }, output: "good", quality: 1, latency_ms: 1 },
     ];
     const selected = selectEvidenceCases(cases);
@@ -158,6 +158,7 @@ describe("evidence sanitization", () => {
     );
     expect(text).toContain("[redacted]");
     expect(text).not.toContain("abc");
+    expect(text).toContain("got 性感 want 软色情");
   });
 });
 

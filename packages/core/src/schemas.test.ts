@@ -24,6 +24,7 @@ import {
 
 const repo = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 const exampleDir = join(repo, "examples", "support-bot");
+const imageTaggerDir = join(repo, "examples", "image-tagger");
 
 const requiredBySchema: Record<keyof typeof namedSchemas, string[]> = {
   "prompt-card": ["id", "source", "rung", "status"],
@@ -79,6 +80,26 @@ describe("example files", () => {
     expect(suite.cases).toHaveLength(
       suite.splits.train.case_ids.length + suite.splits.val.case_ids.length,
     );
+
+    const ajv = new Ajv({ allErrors: true, strict: false });
+    const validate = ajv.compile(jsonSchemaFor("eval-suite"));
+    expect(validate(suite), JSON.stringify(validate.errors)).toBe(true);
+  });
+
+  it("validates the image-tagger suite (vision + custom metric + sampling)", () => {
+    const suite = loadSuiteFromFile(join(imageTaggerDir, "suite.yaml"));
+    expect(suite.id).toBe("image-tagger");
+    expect(suite.metric).toEqual({
+      id: "nsfw_severity_tag",
+      kind: "custom",
+      returns_feedback: true,
+    });
+    expect(suite.temperature).toBe(1);
+    expect(suite.max_tokens).toBe(4096);
+    expect(suite.cases).toHaveLength(8);
+    expect(suite.splits.train.case_ids).toHaveLength(5);
+    expect(suite.splits.val.case_ids).toHaveLength(3);
+    expect(suite.cases.every((item) => typeof item.input.image === "string")).toBe(true);
 
     const ajv = new Ajv({ allErrors: true, strict: false });
     const validate = ajv.compile(jsonSchemaFor("eval-suite"));

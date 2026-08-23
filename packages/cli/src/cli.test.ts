@@ -10,6 +10,7 @@ import { ingest, bind, exportCard, runR0 } from "@sysprompt-lab/cli";
 const repo = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 const cli = join(repo, "packages", "cli", "src", "cli.ts");
 const example = join(repo, "examples", "support-bot");
+const imageTagger = join(repo, "examples", "image-tagger");
 
 /** Full OpenAI-style keys. A masked `***…xx` form is allowed. */
 const FULL_API_KEY = /sk-[a-zA-Z0-9_-]{8,}/;
@@ -94,6 +95,20 @@ describe("CLI ingest → bind → export", () => {
       "utf8",
     );
     expect(exportedPrompt).toContain("Northwind");
+  });
+
+  it("ingests and validates image-tagger without local images or LLM env", () => {
+    const root = mkdtempSync(join(tmpdir(), "spl-cli-vision-"));
+    const ingestOut = runCli(root, ["ingest", imageTagger]);
+    expect(ingestOut).toMatch(/ingested image-tagger \(draft\)/);
+    const bindOut = runCli(root, ["bind", "image-tagger", join(imageTagger, "suite.yaml")]);
+    expect(bindOut).toMatch(/bound image-tagger to suite image-tagger/);
+    const validateOut = runCli(root, ["validate", join(imageTagger, "suite.yaml")]);
+    expect(validateOut).toMatch(/ok suite image-tagger \(8 cases\)/);
+    const card = parseCard(
+      JSON.parse(readFileSync(join(root, ".spl", "cards", "image-tagger.json"), "utf8")),
+    );
+    expect(card.versions[0]?.system_prompt).toMatch(/软色情/);
   });
 });
 

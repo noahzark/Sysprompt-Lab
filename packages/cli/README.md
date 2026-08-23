@@ -19,7 +19,7 @@ Commands (also exported for `import { ingest } from "sysprompt-lab"`):
 | `run --rung R0\|R1\|R2` | Optimize (forwards patch-mode and R1/R2 flags) |
 | `validate` | Card JSON or suite YAML/JSON |
 
-Patch-mode flags (`--rewrite-mode`, `--max-patch-ratio`, `--allow-full-rewrite` / `--no-allow-full-rewrite`) are parsed here and passed through. Do not drop them.
+Patch-mode flags (`--rewrite-mode`, `--max-patch-ratio`, `--allow-full-rewrite` / `--no-allow-full-rewrite`) and student-eval flags (`--temperature`, `--max-tokens`) are parsed here and passed through. Do not drop them.
 
 ```ts
 import { ingest, bind, exportCard, promoteVersion } from "@sysprompt-lab/cli";

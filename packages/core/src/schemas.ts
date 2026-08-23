@@ -65,6 +65,9 @@ export const EvalSuiteSchema = z.object({
     train: SplitSchema,
     val: SplitSchema,
   }),
+  /** Student / execution sampling. Rewriters keep their own colder defaults. */
+  temperature: z.number().optional(),
+  max_tokens: z.number().int().nonnegative().optional(),
 });
 
 export const PromptCardSchema = z.object({
@@ -197,6 +200,8 @@ const SuiteFileSchema = z.object({
     train: SplitInputSchema,
     val: SplitInputSchema,
   }),
+  temperature: z.number().optional(),
+  max_tokens: z.number().int().nonnegative().optional(),
 });
 
 function asSplit(name: SplitName, value: z.infer<typeof SplitInputSchema>): Split {
@@ -220,6 +225,8 @@ export function normalizeSuite(data: unknown): EvalSuite {
       train: asSplit("train", raw.splits.train),
       val: asSplit("val", raw.splits.val),
     },
+    temperature: raw.temperature,
+    max_tokens: raw.max_tokens,
   });
   return suite;
 }

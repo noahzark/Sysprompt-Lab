@@ -70,6 +70,14 @@ program
   )
   .option("--allow-full-rewrite", "R0/R1: fall back to a full rewrite if the patch cannot be applied")
   .option("--no-allow-full-rewrite", "R0/R1: do not fall back to a full rewrite")
+  .option(
+    "--temperature <n>",
+    "R0/R1 student eval temperature (default 0, or suite.temperature). Rewriter stays colder.",
+  )
+  .option(
+    "--max-tokens <n>",
+    "R0/R1 student eval max_tokens (omit by default, or suite.max_tokens). 0 means omit.",
+  )
   .action(
     async (
       card: string,
@@ -83,6 +91,8 @@ program
         budget?: string;
         rewriteMode?: string;
         maxPatchRatio?: string;
+        temperature?: string;
+        maxTokens?: string;
       },
     ) => {
       const rung = opts.rung.toUpperCase();
@@ -94,6 +104,8 @@ program
       const rewriteMode = parseRewriteMode(opts.rewriteMode);
       const maxPatchRatio = parseMaxPatchRatio(opts.maxPatchRatio);
       const allowFullRewrite = peekAllowFullRewrite();
+      const temperature = parseOptionalNumber(opts.temperature, "--temperature");
+      const maxTokens = parseOptionalNonNegInt(opts.maxTokens, "--max-tokens");
       if (rung === "R0") {
         const result = await runR0(card, {
           root: rootOpt(),
@@ -102,6 +114,8 @@ program
           rewriteMode,
           maxPatchRatio,
           allowFullRewrite,
+          temperature,
+          maxTokens,
         });
         if (result.dryRun) {
           console.log(`R0 stub ${result.run.id}: candidate ${result.candidate.id} (hypothesis=stub)`);
@@ -177,6 +191,8 @@ program
         rewriteMode,
         maxPatchRatio,
         allowFullRewrite,
+        temperature,
+        maxTokens,
       });
       if (result.dryRun) {
         console.log(
@@ -260,6 +276,28 @@ function parseOptionalInt(value: string | undefined, label: string): number | un
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1) {
     throw new Error(`${label} must be a positive integer, got "${value}"`);
+  }
+  return n;
+}
+
+function parseOptionalNumber(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new Error(`${label} must be a number, got "${value}"`);
+  }
+  return n;
+}
+
+function parseOptionalNonNegInt(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`${label} must be a non-negative integer, got "${value}"`);
   }
   return n;
 }
