@@ -4,6 +4,7 @@ import { bind, exportCard, ingest, promoteVersion, runR0, runR1, runR2 } from ".
 import { formatLlmTarget, loadEnvFiles, peekRootFlag, readLlmConfig } from "@sysprompt-lab/llm";
 import { parseMaxPatchRatio, parseRewriteMode } from "@sysprompt-lab/rewrite";
 import { loadCardFromFile, loadSuiteFromFile } from "@sysprompt-lab/core";
+import { registerSuiteViewerCommand } from "@sysprompt-lab/suite-viewer";
 
 loadEnvFiles({ cwd: process.cwd(), root: peekRootFlag() });
 
@@ -11,7 +12,9 @@ const program = new Command();
 
 program
   .name("sysprompt")
-  .description("Sysprompt Lab — ingest, bind, R0 rewrite / R1 eval-loop / R2 GEPA wrap, export system-prompt cards")
+  .description(
+    "Sysprompt Lab — ingest, bind, R0 rewrite / R1 eval-loop / R2 GEPA wrap, export, or local suite-viewer",
+  )
   .version("0.1.0")
   .option("--root <dir>", "workspace root that holds .spl/ (default: cwd)");
 
@@ -254,6 +257,8 @@ program
     const card = loadCardFromFile(path);
     console.log(`ok card ${card.id} (${card.status})`);
   });
+
+registerSuiteViewerCommand(program);
 
 function rootOpt(): string | undefined {
   return program.opts<{ root?: string }>().root;

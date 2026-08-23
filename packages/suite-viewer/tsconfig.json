@@ -6,10 +6,8 @@
   },
   "references": [
     { "path": "../core" },
-    { "path": "../llm" },
-    { "path": "../rewrite" },
-    { "path": "../rungs" },
-    { "path": "../suite-viewer" }
+    { "path": "../eval" },
+    { "path": "../llm" }
   ],
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]

@@ -18,6 +18,7 @@ Commands (also exported for `import { ingest } from "sysprompt-lab"`):
 | `promote` | Human accept (does not re-run the gate) |
 | `run --rung R0\|R1\|R2` | Optimize (forwards patch-mode and R1/R2 flags) |
 | `validate` | Card JSON or suite YAML/JSON |
+| `suite-viewer` | Localhost WebUI to inspect / label a suite (`--port`, `--image-dir`) |
 
 Patch-mode flags (`--rewrite-mode`, `--max-patch-ratio`, `--allow-full-rewrite` / `--no-allow-full-rewrite`) and student-eval flags (`--temperature`, `--max-tokens`) are parsed here and passed through. Do not drop them.
 
@@ -29,7 +30,7 @@ Dev: `npx tsx packages/cli/src/cli.ts` or `npm run sysprompt` from the repo root
 
 ## Dependencies
 
-`commander`, `@sysprompt-lab/core`, `@sysprompt-lab/llm`, `@sysprompt-lab/rewrite`, `@sysprompt-lab/rungs`.
+`commander`, `@sysprompt-lab/core`, `@sysprompt-lab/llm`, `@sysprompt-lab/rewrite`, `@sysprompt-lab/rungs`, `@sysprompt-lab/suite-viewer`.
 
 ## Must not live here
 

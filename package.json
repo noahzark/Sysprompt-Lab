@@ -34,6 +34,7 @@
     "emit-schemas": "tsx packages/core/src/emit-schemas.ts",
     "sysprompt": "tsx packages/cli/src/cli.ts",
     "spl": "tsx packages/cli/src/cli.ts",
+    "suite-viewer": "tsx packages/suite-viewer/src/cli.ts",
     "test": "vitest run",
     "test:python": "python3 -m unittest discover -s python/tests -t python",
     "prepublishOnly": "npm run build"
@@ -54,6 +55,7 @@
     "@sysprompt-lab/llm": "*",
     "@sysprompt-lab/rewrite": "*",
     "@sysprompt-lab/rungs": "*",
+    "@sysprompt-lab/suite-viewer": "*",
     "commander": "^13.1.0",
     "diff": "^7.0.0",
     "dotenv": "^17.4.2",

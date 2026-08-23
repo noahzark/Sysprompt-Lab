@@ -30,6 +30,7 @@ Do not reimplement GEPA. Do not fork AGPL tools. Do not invent a second object m
     rewrite/                # full rewrite + patch split/apply + R0/R1 meta-prompts
     rungs/                  # R0 / R1 / R2 orchestration only
     cli/                    # `sysprompt` / `spl` bin and commands
+    suite-viewer/           # localhost Suite Viewer WebUI (label suites)
   python/                   # GEPA sidecar (stdin/stdout JSON job). Not a TS package
   schemas/                  # JSON Schema (draft-07) sources of truth
   examples/                 # ingestable cards (support-bot must keep working)
@@ -49,6 +50,8 @@ cli → rungs → rewrite
             → eval
             → llm
             → core
+     cli → suite-viewer → eval → llm
+                        → core
      rewrite → llm → (none)
              → core
      eval    → llm
@@ -62,7 +65,8 @@ cli → rungs → rewrite
 | `eval` | Suite execution, case scoring, train/val splits, adopt/promote **decisions** | Rewriter meta-prompts, patch apply, Python sidecar, CLI |
 | `rewrite` | Full rewrite + section split/patch apply + R0/R1 meta-prompts shared by both rungs | Rung loops, promote gate, workspace writes, GEPA |
 | `rungs` | Thin R0 / R1 / R2 orchestration (job setup, artifact names, calling rewrite/eval/sidecar) | JSON Schema, raw HTTP client, Commander program |
-| `cli` | `sysprompt` / `spl` bins, `ingest` / `bind` / `export` / `promote` / `run` / `validate` | Domain algorithms that other packages need |
+| `cli` | `sysprompt` / `spl` bins, `ingest` / `bind` / `export` / `promote` / `run` / `validate` / `suite-viewer` | Domain algorithms that other packages need |
+| `suite-viewer` | Localhost WebUI to inspect / label a suite YAML (gold + notes) | Cloud hosting, auth, model eval from the UI, committed image benches |
 
 Rungs are **product** names (R0, R1, R2). File and export names should be domain words (`eval`, `patch`, `promote`, `rewrite`) — not a pile of `r1.ts` at the repo root. Rung *orchestration* files may stay `r0.ts` / `r1.ts` / `r2.ts` **inside** `packages/rungs`.
 
@@ -100,7 +104,7 @@ Optional:
 | `SYSPROMPT_PATCH_THRESHOLD` | `auto` uses patch when prompt length ≥ this (default **1500** chars) |
 | `SYSPROMPT_IMAGE_DIR` | Directory of local images for multimodal eval (`input.image` / `input.image_path`) |
 
-`ingest` / `bind` / `export` / `validate` / `run --dry-run` must work with no LLM env.
+`ingest` / `bind` / `export` / `validate` / `run --dry-run` / `suite-viewer` must work with no LLM env.
 
 ## Multimodal eval
 
@@ -127,6 +131,18 @@ Behavioral contract — keep these defaults unless a flag/env overrides them:
 - `--dry-run` applies a tiny fake patch; no LLM calls.
 - R2 is whole-instruction GEPA. Large-prompt patch mode is R0/R1 only.
 
+## Suite Viewer (local)
+
+Inspect or manually label a **private** eval suite in the browser. Localhost only (`127.0.0.1`); images stay on disk.
+
+```bash
+npm run suite-viewer -- /path/to/private/suite.yaml
+# or
+npm run sysprompt -- suite-viewer /path/to/private/suite.yaml --port 8787 --image-dir /path/to/images
+```
+
+`--port` default `8787`. Image paths resolve relative to the suite file, `--image-dir`, or `SYSPROMPT_IMAGE_DIR`. Save writes gold (and optional notes as `feedback`) atomically and re-parses the suite. Confirm if the file mtime changed. Do not commit benches or image binaries. No auth, no cloud deploy, no model eval from the UI.
+
 ## Testing
 
 - `npm test` is **offline** and must stay green (no network, no real API tokens).
@@ -139,6 +155,6 @@ Behavioral contract — keep these defaults unless a flag/env overrides them:
 ## PR hygiene
 
 - Small, focused PRs. Structure-only changes should not change optimize/eval behavior.
-- Keep the published CLI UX: from repo root, `ingest`, `bind`, `export`, `promote`, `run --rung R0|R1|R2` (plus patch-mode flags) still work via `npm run sysprompt`.
+- Keep the published CLI UX: from repo root, `ingest`, `bind`, `export`, `promote`, `run --rung R0|R1|R2` (plus patch-mode flags) and `suite-viewer` still work via `npm run sysprompt`.
 - New packages need `package.json` + `README.md` (purpose, exports, deps, non-goals).
 - Do not add ephemeral task lists to this file.

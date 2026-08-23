@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Suite Viewer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <strong>Suite Viewer</strong>
+        <span id="suite-path" class="path" title="">—</span>
+      </div>
+      <div id="chips" class="chips" aria-live="polite"></div>
+      <button type="button" id="reload" class="btn">Reload</button>
+    </header>
+    <main class="layout">
+      <aside class="pane list-pane">
+        <div class="filters">
+          <label>
+            Split
+            <select id="filter-split">
+              <option value="all">all</option>
+              <option value="train">train</option>
+              <option value="val">val</option>
+              <option value="unassigned">unassigned</option>
+            </select>
+          </label>
+          <label>
+            Severity / gold
+            <select id="filter-severity">
+              <option value="all">all</option>
+            </select>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="filter-unlabeled" />
+            Unlabeled only
+          </label>
+        </div>
+        <ul id="case-list" class="case-list"></ul>
+      </aside>
+      <section class="pane detail-pane">
+        <div id="empty-detail" class="empty">Select a case from the list.</div>
+        <article id="detail" hidden>
+          <div class="detail-head">
+            <h1 id="case-id"></h1>
+            <span id="case-split" class="chip"></span>
+            <span id="case-image-chip" class="chip" hidden></span>
+          </div>
+          <figure id="image-wrap" hidden>
+            <img id="case-image" alt="Case image" />
+            <figcaption id="image-caption"></figcaption>
+          </figure>
+          <p id="image-missing" class="warn" hidden>Image path is set but the file was not found on disk.</p>
+          <label class="block">
+            User text
+            <pre id="user-text" class="box"></pre>
+          </label>
+          <div id="nsfw-controls" hidden>
+            <fieldset>
+              <legend>Severity</legend>
+              <div id="severity-picker" class="picks"></div>
+            </fieldset>
+            <fieldset>
+              <legend>Accept (borderline)</legend>
+              <div id="accept-picker" class="picks"></div>
+            </fieldset>
+          </div>
+          <label class="block">
+            Gold JSON
+            <textarea id="gold-json" rows="8" spellcheck="false"></textarea>
+          </label>
+          <label class="block">
+            Notes
+            <textarea id="notes" rows="3" placeholder="Optional. Saved as case.feedback."></textarea>
+          </label>
+          <div class="actions">
+            <button type="button" id="save" class="btn primary">Save</button>
+            <span id="status" class="status" role="status"></span>
+          </div>
+        </article>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

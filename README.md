@@ -31,6 +31,7 @@ packages/eval      Score, splits, promote / adopt gate
 packages/rewrite   Full rewrite + patch apply + R0/R1 meta-prompts
 packages/rungs     R0 / R1 / R2 orchestration (R2 calls python/)
 packages/cli       sysprompt / spl bins and commands
+packages/suite-viewer  localhost Suite Viewer (inspect / label suites)
 python/            GEPA sidecar (not inside a TS package)
 schemas/           JSON Schema draft-07 sources of truth
 examples/          Ingestable cards (support-bot)
@@ -130,6 +131,19 @@ Flags:
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 
 Vision cases are supported in the framework (`input.image` / `input.image_path`, student `--temperature` / `--max-tokens`, custom metric `nsfw_severity_tag`) but **do not commit** image binaries or a real tagging bench. Keep the suite and files on your machine; point images at a local directory or `SYSPROMPT_IMAGE_DIR`. Gold for `nsfw_severity_tag` may list multiple acceptable severities (`accept` or a `severity` array) for borderline images.
+
+### Suite Viewer (local WebUI)
+
+Inspect a suite, preview local images, and write gold / notes back to the YAML on disk. Binds **localhost only** (`127.0.0.1:8787` by default). No cloud deploy, no auth, no model eval from the UI.
+
+```bash
+npm run suite-viewer -- examples/support-bot/suite.yaml
+npm run suite-viewer -- /path/to/private/suite.yaml --port 8787 --image-dir /path/to/images
+# same via the CLI:
+npm run sysprompt -- suite-viewer /path/to/private/suite.yaml
+```
+
+Point this at a **private** suite path. Save is atomic (temp + rename) and refuses to write an invalid NSFW severity. If the file changed on disk, the UI asks before overwrite. See [`packages/suite-viewer/README.md`](packages/suite-viewer/README.md).
 
 ## 在哪里配置 / Where to configure
 

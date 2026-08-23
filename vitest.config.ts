@@ -17,6 +17,7 @@ export default defineConfig({
       "@sysprompt-lab/rewrite": join(root, "packages/rewrite/src/index.ts"),
       "@sysprompt-lab/rungs": join(root, "packages/rungs/src/index.ts"),
       "@sysprompt-lab/cli": join(root, "packages/cli/src/index.ts"),
+      "@sysprompt-lab/suite-viewer": join(root, "packages/suite-viewer/src/index.ts"),
     },
   },
 });
