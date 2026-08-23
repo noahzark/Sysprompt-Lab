@@ -1,0 +1,43 @@
+id: support-bot
+name: Support bot offline suite
+# kind=custom is the Phase 0 stand-in for simple string-contains scoring
+# (no model calls). Later rungs may use exact or llm_judge on the same cases.
+metric:
+  id: string_contains
+  kind: custom
+  returns_feedback: false
+splits:
+  train:
+    - greet-hello
+    - refund-ask
+    - hours-ask
+    - unknown-order
+  val:
+    - greet-hi
+    - escalate-angry
+cases:
+  - id: greet-hello
+    input:
+      user: Hello
+    gold: happy to help
+  - id: refund-ask
+    input:
+      user: I want a refund for my last purchase.
+    gold: 30-day
+  - id: hours-ask
+    input:
+      user: What are your store hours?
+    gold: 09:00
+  - id: unknown-order
+    input:
+      user: Where is order NW-9999?
+    gold: order id
+    feedback: Do not invent a tracking status.
+  - id: greet-hi
+    input:
+      user: Hi there
+    gold: help
+  - id: escalate-angry
+    input:
+      user: This is ridiculous. I want to talk to a human.
+    gold: escalate

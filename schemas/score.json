@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sysprompt.lab/schemas/score.json",
+  "title": "Score",
+  "type": "object",
+  "properties": {
+    "quality": {
+      "type": "number"
+    },
+    "cost": {
+      "type": "number"
+    },
+    "latency_ms": {
+      "type": "number"
+    },
+    "split": {
+      "type": "string",
+      "enum": [
+        "train",
+        "val"
+      ]
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metric_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "quality",
+    "split",
+    "model_id",
+    "metric_id"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sysprompt.lab/schemas/split.json",
+  "title": "Split",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "enum": [
+        "train",
+        "val"
+      ]
+    },
+    "case_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "name",
+    "case_ids"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,58 @@
+{
+  "name": "sysprompt-lab",
+  "version": "0.1.0",
+  "description": "Cross-model system-prompt workbench: ingest → optimize → execute → verify → promote.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "sysprompt": "./dist/cli.js",
+    "spl": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && tsx src/emit-schemas.ts",
+    "emit-schemas": "tsx src/emit-schemas.ts",
+    "sysprompt": "tsx src/cli.ts",
+    "spl": "tsx src/cli.ts",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/noahzark/Sysprompt-Lab.git"
+  },
+  "keywords": [
+    "system-prompt",
+    "eval",
+    "cli"
+  ],
+  "dependencies": {
+    "commander": "^13.1.0",
+    "diff": "^7.0.0",
+    "yaml": "^2.8.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2",
+    "@types/node": "^22.13.10",
+    "ajv": "^8.17.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.9",
+    "zod-to-json-schema": "^3.24.5"
+  }
+}

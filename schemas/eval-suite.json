@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sysprompt.lab/schemas/eval-suite.json",
+  "title": "EvalSuite",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "gold": {},
+          "feedback": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "input"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "metric": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "llm_judge",
+            "custom"
+          ]
+        },
+        "returns_feedback": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "returns_feedback"
+      ],
+      "additionalProperties": false
+    },
+    "splits": {
+      "type": "object",
+      "properties": {
+        "train": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "enum": [
+                "train",
+                "val"
+              ]
+            },
+            "case_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "name",
+            "case_ids"
+          ],
+          "additionalProperties": false
+        },
+        "val": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "enum": [
+                "train",
+                "val"
+              ]
+            },
+            "case_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "name",
+            "case_ids"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "train",
+        "val"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "cases",
+    "metric",
+    "splits"
+  ],
+  "additionalProperties": false
+}

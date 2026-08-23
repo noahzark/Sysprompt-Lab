@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sysprompt.lab/schemas/eval-case.json",
+  "title": "EvalCase",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": {}
+    },
+    "gold": {},
+    "feedback": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "input"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sysprompt.lab/schemas/tool-spec.json",
+  "title": "ToolSpec",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "description"
+  ],
+  "additionalProperties": false
+}

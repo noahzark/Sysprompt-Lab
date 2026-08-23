@@ -53,6 +53,10 @@ ENV/
 
 # Node / frontend
 node_modules/
+dist/
+
+# Sysprompt Lab workspace (local cards / runs / exports)
+.spl/
 
 # Tooling
 .mypy_cache/

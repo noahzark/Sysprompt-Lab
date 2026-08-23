@@ -1,0 +1,7 @@
+[
+  {
+    "id": "lookup_order",
+    "name": "lookup_order",
+    "description": "Look up an order by id. Returns status and ship date when known."
+  }
+]

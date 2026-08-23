@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sysprompt.lab/schemas/run.json",
+  "title": "Run",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "card_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rung": {
+      "type": "string",
+      "enum": [
+        "R0",
+        "R1",
+        "R2"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "budget": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "card_id",
+    "rung",
+    "status"
+  ],
+  "additionalProperties": false
+}
