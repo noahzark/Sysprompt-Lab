@@ -63,3 +63,23 @@ Optional knobs (flags override `SYSPROMPT_R1_*`):
 npm run sysprompt -- run support-bot --rung R1 --rounds 3 --candidates 3 --pass-streak 1
 npm run sysprompt -- run support-bot --rung R1 --dry-run
 ```
+
+## Live R2 (GEPA wrap)
+
+Python 3.10+ and the official `gepa` package. Same `.env` as R0/R1; optional `LLM_REFLECTION_MODEL` for the reflection LM (falls back to `LLM_API_MODEL`).
+
+```bash
+pip install -r python/requirements.txt   # or: pip install -e python/
+npm run sysprompt -- ingest examples/support-bot
+npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
+npm run sysprompt -- run support-bot --rung R2
+npm run sysprompt -- run support-bot --rung R2 --budget light
+```
+
+`--dry-run` skips Python (CI / no-network):
+
+```bash
+npm run sysprompt -- run support-bot --rung R2 --dry-run
+```
+
+Artifacts under `.spl/runs/<id>/`: `r2.diff`, `sidecar.json`, `scores.json`, `summary.md`. Auto-promote only if val (or train if there is no val) strictly beats the original baseline.

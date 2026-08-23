@@ -1,0 +1,6 @@
+# Official GEPA engine. Live R2 needs this; CI uses --dry-run / a mocked sidecar.
+# Python 3.10–3.14. Install from the repo root:
+#   pip install -r python/requirements.txt
+# or:
+#   pip install -e python/
+gepa>=0.1.4,<0.2
