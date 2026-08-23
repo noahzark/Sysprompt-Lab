@@ -9,20 +9,63 @@ export function isNsfwSeverityTag(value: string): value is NsfwSeverityTag {
   return SEVERITY_SET.has(value);
 }
 
-/** Gold may be `"软色情"` or `{ severity: "软色情" }`. */
-export function goldSeverity(gold: unknown): string | undefined {
-  if (typeof gold === "string") {
-    const trimmed = gold.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
+function trimNonEmpty(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
   }
-  if (gold && typeof gold === "object" && "severity" in gold) {
-    const value = (gold as { severity?: unknown }).severity;
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function uniqueTrimmedStrings(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const trimmed = trimNonEmpty(item);
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      out.push(trimmed);
     }
   }
-  return undefined;
+  return out;
+}
+
+/**
+ * Acceptable gold severities for `nsfw_severity_tag`.
+ *
+ * Supported forms:
+ * - `"软色情"`
+ * - `{ severity: "软色情" }` (primary; accept defaults to `[severity]`)
+ * - `{ severity: "软色情", accept: ["擦边", "软色情"] }`
+ * - `{ accept: ["擦边", "软色情"] }`
+ * - `{ severity: ["擦边", "软色情"] }` (`severity` as the accept set)
+ */
+export function goldAcceptSet(gold: unknown): string[] {
+  if (typeof gold === "string") {
+    const trimmed = trimNonEmpty(gold);
+    return trimmed ? [trimmed] : [];
+  }
+  if (!gold || typeof gold !== "object" || Array.isArray(gold)) {
+    return [];
+  }
+  const obj = gold as { severity?: unknown; accept?: unknown };
+  const accept = uniqueTrimmedStrings(obj.accept);
+  if (accept.length > 0) {
+    return accept;
+  }
+  if (Array.isArray(obj.severity)) {
+    return uniqueTrimmedStrings(obj.severity);
+  }
+  const primary = trimNonEmpty(obj.severity);
+  return primary ? [primary] : [];
+}
+
+/** Primary gold severity, or the first item of the accept set. */
+export function goldSeverity(gold: unknown): string | undefined {
+  return goldAcceptSet(gold)[0];
 }
 
 /**
@@ -68,17 +111,18 @@ export function severityTagsIn(tags: unknown): string[] {
 }
 
 /**
- * Custom metric `nsfw_severity_tag`: exact match of the single NSFW severity tag.
- * Feedback on miss is `got X want Y` for the R1 rewriter (text only).
+ * Custom metric `nsfw_severity_tag`: the single predicted NSFW severity tag
+ * must be in the gold accept set. Feedback on miss is `got X want A|B`.
  */
 export function scoreNsfwSeverityTag(
   output: string,
   gold: unknown,
 ): { quality: number; note?: string } {
-  const want = goldSeverity(gold);
-  if (!want) {
+  const accept = goldAcceptSet(gold);
+  if (accept.length === 0) {
     return { quality: 0, note: "no gold severity" };
   }
+  const want = accept.join("|");
   const obj = parseJsonObjectFromModelOutput(output);
   if (!obj) {
     return { quality: 0, note: `got (unparseable) want ${want}` };
@@ -91,7 +135,7 @@ export function scoreNsfwSeverityTag(
     return { quality: 0, note: `got ${found.join("+")} want ${want}` };
   }
   const got = found[0]!;
-  if (got === want) {
+  if (accept.includes(got)) {
     return { quality: 1 };
   }
   return { quality: 0, note: `got ${got} want ${want}` };
