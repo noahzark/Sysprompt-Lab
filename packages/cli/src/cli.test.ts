@@ -47,6 +47,8 @@ describe("CLI suite-viewer help", () => {
     expect(out).toMatch(/127\.0\.0\.1|localhost/);
     expect(out).toMatch(/--port/);
     expect(out).toMatch(/--image-dir/);
+    expect(out).toMatch(/--run/);
+    expect(out).toMatch(/--runs-dir/);
     expect(out).toMatch(/private/);
     expect(out).toMatch(/8787/);
   });

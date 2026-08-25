@@ -66,7 +66,7 @@ cli → rungs → rewrite
 | `rewrite` | Full rewrite + section split/patch apply + R0/R1 meta-prompts shared by both rungs | Rung loops, promote gate, workspace writes, GEPA |
 | `rungs` | Thin R0 / R1 / R2 orchestration (job setup, artifact names, calling rewrite/eval/sidecar) | JSON Schema, raw HTTP client, Commander program |
 | `cli` | `sysprompt` / `spl` bins, `ingest` / `bind` / `export` / `promote` / `run` / `validate` / `suite-viewer` | Domain algorithms that other packages need |
-| `suite-viewer` | Localhost WebUI to inspect / label a suite YAML (gold + notes) | Cloud hosting, auth, model eval from the UI, committed image benches |
+| `suite-viewer` | Localhost WebUI to inspect / label a suite YAML (gold + notes); optional read-only `--run` overlay | Cloud hosting, auth, model eval from the UI, committed image benches |
 
 Rungs are **product** names (R0, R1, R2). File and export names should be domain words (`eval`, `patch`, `promote`, `rewrite`) — not a pile of `r1.ts` at the repo root. Rung *orchestration* files may stay `r0.ts` / `r1.ts` / `r2.ts` **inside** `packages/rungs`.
 
@@ -139,6 +139,8 @@ Inspect or manually label a **private** eval suite in the browser. Localhost onl
 npm run suite-viewer -- /path/to/private/suite.yaml
 # or
 npm run sysprompt -- suite-viewer /path/to/private/suite.yaml --port 8787 --image-dir /path/to/images
+# optional: overlay one saved traj (does not run eval)
+npm run suite-viewer -- /path/to/private/suite.yaml --run /path/to/report.json
 ```
 
 `--port` default `8787`. Image paths resolve relative to the suite file, `--image-dir`, or `SYSPROMPT_IMAGE_DIR`. Save writes gold (and optional notes as `feedback`) atomically and re-parses the suite. Confirm if the file mtime changed. Do not commit benches or image binaries. No auth, no cloud deploy, no model eval from the UI.

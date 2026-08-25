@@ -134,16 +134,17 @@ Vision cases are supported in the framework (`input.image` / `input.image_path`,
 
 ### Suite Viewer (local WebUI)
 
-Inspect a suite, preview local images, and write gold / notes back to the YAML on disk. Binds **localhost only** (`127.0.0.1:8787` by default). No cloud deploy, no auth, no model eval from the UI.
+Inspect a suite, preview local images, and write gold / notes back to the YAML on disk. Optionally overlay one saved eval run (`--run report.json|scores.json`) to inspect misses — gold vs model output, plus reasoning when the file has it. Binds **localhost only** (`127.0.0.1:8787` by default). No cloud deploy, no auth, no model eval from the UI.
 
 ```bash
 npm run suite-viewer -- examples/support-bot/suite.yaml
 npm run suite-viewer -- /path/to/private/suite.yaml --port 8787 --image-dir /path/to/images
+npm run suite-viewer -- examples/support-bot/suite.yaml --run /path/to/report.json
 # same via the CLI:
-npm run sysprompt -- suite-viewer /path/to/private/suite.yaml
+npm run sysprompt -- suite-viewer /path/to/private/suite.yaml --run scores.json --runs-dir .spl/runs
 ```
 
-Point this at a **private** suite path. Save is atomic (temp + rename) and refuses to write an invalid NSFW severity. If the file changed on disk, the UI asks before overwrite. See [`packages/suite-viewer/README.md`](packages/suite-viewer/README.md).
+Point this at a **private** suite path. Save is atomic (temp + rename) and refuses to write an invalid NSFW severity. If the file changed on disk, the UI asks before overwrite. Saving gold does not mutate the run file. See [`packages/suite-viewer/README.md`](packages/suite-viewer/README.md).
 
 ## 在哪里配置 / Where to configure
 

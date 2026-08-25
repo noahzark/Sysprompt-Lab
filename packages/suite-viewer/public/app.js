@@ -11,7 +11,40 @@
     selectedId: null,
     detail: null,
     nsfw: false,
+    run: null,
+    runs: [],
   };
+
+  function esc(text) {
+    return String(text ?? "").replace(/[&<>"']/g, (ch) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch],
+    );
+  }
+
+  function shortText(text, max = 72) {
+    const collapsed = String(text ?? "").replace(/\s+/g, " ").trim();
+    if (collapsed.length <= max) {
+      return collapsed;
+    }
+    return `${collapsed.slice(0, max - 1)}…`;
+  }
+
+  function predictionStatus(item) {
+    return item?.prediction?.status || "none";
+  }
+
+  function statusLabel(status) {
+    if (status === "ok") {
+      return "OK";
+    }
+    if (status === "miss") {
+      return "MISS";
+    }
+    if (status === "error") {
+      return "ERROR";
+    }
+    return "—";
+  }
 
   function setStatus(text, kind) {
     const el = $("status");
@@ -136,9 +169,79 @@
     for (const [key, count] of Object.entries(o.goldHistogram)) {
       chips.push(`${key} ×${count}`);
     }
+    const run = state.run;
+    if (run && !run.error) {
+      if (run.model) {
+        chips.push(run.model);
+      }
+      if (typeof run.meanQuality === "number") {
+        chips.push(`run ${run.meanQuality.toFixed(3)}`);
+      }
+      chips.push(`OK ${run.hitCount ?? 0}`);
+      chips.push(`MISS ${run.missCount ?? 0}`);
+      if (run.errorCount) {
+        chips.push(`errors ${run.errorCount}`);
+      }
+    }
     $("chips").innerHTML = chips
-      .map((text, i) => `<span class="chip${i === 6 && o.missingImageCount ? " warn" : ""}">${text}</span>`)
+      .map((text, i) => `<span class="chip${i === 6 && o.missingImageCount ? " warn" : ""}">${esc(text)}</span>`)
       .join("");
+  }
+
+  function applySuiteBody(body) {
+    state.path = body.path;
+    state.mtimeMs = body.mtimeMs;
+    state.overview = body.overview;
+    state.cases = body.cases;
+    state.nsfwTags = body.nsfwTags ?? [];
+    state.nsfw = Boolean(body.overview?.nsfw);
+    state.run = body.run ?? null;
+    state.runs = body.runs ?? [];
+    $("suite-path").textContent = body.path;
+    $("suite-path").title = body.path;
+    document.title = `${body.overview.id} — Suite Viewer`;
+    renderPickers();
+    renderChips();
+    fillSeverityFilter();
+    renderRunBar();
+    renderList();
+  }
+
+  function renderRunBar() {
+    const input = $("run-path");
+    const meta = $("run-meta");
+    const select = $("run-select");
+    const wrap = $("run-select-wrap");
+    if (document.activeElement !== input) {
+      input.value = state.run?.path || "";
+    }
+    if (state.run?.error) {
+      meta.textContent = state.run.error;
+      meta.className = "run-meta status err";
+    } else if (state.run?.path) {
+      const bits = [state.run.kind, state.run.model, typeof state.run.meanQuality === "number" ? state.run.meanQuality.toFixed(3) : ""]
+        .filter(Boolean);
+      meta.textContent = bits.join(" · ");
+      meta.className = "run-meta";
+    } else {
+      meta.textContent = "No run attached";
+      meta.className = "run-meta";
+    }
+    if (state.runs.length > 0) {
+      wrap.hidden = false;
+      const current = state.run?.path || "";
+      select.innerHTML = [`<option value="">— select —</option>`]
+        .concat(
+          state.runs.map(
+            (item) =>
+              `<option value="${esc(item.path)}"${item.path === current ? " selected" : ""}>${esc(item.label)}</option>`,
+          ),
+        )
+        .join("");
+    } else {
+      wrap.hidden = true;
+      select.innerHTML = "";
+    }
   }
 
   function fillSeverityFilter() {
@@ -158,12 +261,19 @@
     const split = $("filter-split").value;
     const severity = $("filter-severity").value;
     const unlabeledOnly = $("filter-unlabeled").checked;
+    const missesOnly = $("filter-misses").checked;
     return state.cases.filter((item) => {
       if (split !== "all" && item.split !== split) {
         return false;
       }
       if (unlabeledOnly && !item.unlabeled) {
         return false;
+      }
+      if (missesOnly) {
+        const status = predictionStatus(item);
+        if (status !== "miss" && status !== "error") {
+          return false;
+        }
       }
       if (severity !== "all") {
         const key = item.unlabeled ? "(unlabeled)" : item.severity || item.goldLabel;
@@ -189,14 +299,26 @@
           ? `<span class="chip">image</span>`
           : `<span class="chip warn">missing image</span>`
         : "";
+      const pred = item.prediction;
+      const status = pred?.status || "";
+      const statusChip =
+        state.run && !state.run.error && status
+          ? `<span class="chip ${status}">${statusLabel(status)}</span>`
+          : "";
+      const predPreview =
+        pred && pred.status !== "none"
+          ? `<div class="preview">${esc(shortText(pred.predictedLabel ?? pred.output ?? pred.error ?? ""))}</div>`
+          : "";
       li.innerHTML = `
-        <strong>${item.id}</strong>
+        <strong>${esc(item.id)}</strong>
         <div class="meta">
-          <span class="chip">${item.split}</span>
-          <span class="chip">${item.goldLabel}</span>
+          <span class="chip">${esc(item.split)}</span>
+          <span class="chip">${esc(item.goldLabel)}</span>
+          ${statusChip}
           ${img}
         </div>
-        <div class="preview">${item.preview || ""}</div>`;
+        <div class="preview">${esc(item.preview || "")}</div>
+        ${predPreview}`;
       li.addEventListener("click", () => selectCase(item.id));
       list.appendChild(li);
     }
@@ -208,19 +330,57 @@
     if (!res.ok) {
       throw new Error(body.error || `HTTP ${res.status}`);
     }
-    state.path = body.path;
-    state.mtimeMs = body.mtimeMs;
-    state.overview = body.overview;
-    state.cases = body.cases;
-    state.nsfwTags = body.nsfwTags ?? [];
-    state.nsfw = Boolean(body.overview?.nsfw);
-    $("suite-path").textContent = body.path;
-    $("suite-path").title = body.path;
-    document.title = `${body.overview.id} — Suite Viewer`;
-    renderPickers();
-    renderChips();
-    fillSeverityFilter();
-    renderList();
+    applySuiteBody(body);
+  }
+
+  function renderTraj(detail) {
+    const section = $("traj");
+    const statusChip = $("traj-status");
+    const pred = detail?.prediction;
+    if (!state.run || state.run.error) {
+      section.hidden = true;
+      statusChip.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    statusChip.hidden = false;
+    const status = pred?.status || "none";
+    statusChip.textContent = statusLabel(status);
+    statusChip.className = `chip ${status}`;
+    $("traj-gold").textContent = goldToText(detail.gold);
+    if (!pred || status === "none") {
+      $("traj-pred").textContent = "(no prediction in this run)";
+      $("traj-note").hidden = true;
+      $("traj-reasoning").hidden = true;
+      return;
+    }
+    const lines = [];
+    if (state.nsfw && pred.predictedLabel) {
+      lines.push(pred.predictedLabel);
+      if (pred.output && pred.output !== pred.predictedLabel) {
+        lines.push(pred.output);
+      }
+    } else if (pred.output !== undefined) {
+      lines.push(pred.output);
+    } else if (pred.error) {
+      lines.push(pred.error);
+    } else {
+      lines.push("(no output)");
+    }
+    $("traj-pred").textContent = lines.join("\n\n");
+    const note = pred.note || pred.error || "";
+    $("traj-note").hidden = !note;
+    $("traj-note").textContent = note;
+    const hasReasoning = Boolean(pred.reasoning || pred.finish_reason || pred.reasoning_tokens !== undefined);
+    $("traj-reasoning").hidden = !hasReasoning;
+    if (hasReasoning) {
+      $("traj-finish-wrap").hidden = !pred.finish_reason;
+      $("traj-finish").textContent = pred.finish_reason || "";
+      $("traj-tokens-wrap").hidden = pred.reasoning_tokens === undefined;
+      $("traj-tokens").textContent = pred.reasoning_tokens === undefined ? "" : String(pred.reasoning_tokens);
+      $("traj-reasoning-text").textContent = pred.reasoning || "";
+      $("traj-reasoning-text").hidden = !pred.reasoning;
+    }
   }
 
   async function selectCase(id) {
@@ -242,6 +402,7 @@
     $("user-text").textContent = body.case.userText || "";
     $("gold-json").value = goldToText(body.case.gold);
     $("notes").value = body.case.notes || "";
+    renderTraj(body.case);
     $("nsfw-controls").hidden = !state.nsfw;
     if (state.nsfw) {
       applyGoldToPickers(body.case.gold);
@@ -308,12 +469,24 @@
       return;
     }
     state.mtimeMs = body.mtimeMs;
-    state.overview = body.suite.overview;
-    state.cases = body.suite.cases;
-    renderChips();
-    fillSeverityFilter();
-    renderList();
-    setStatus("Saved.", "ok");
+    applySuiteBody(body.suite);
+    setStatus("Saved. Suite file only — run overlay unchanged.", "ok");
+  }
+
+  async function loadRun(path) {
+    const res = await fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: path || "" }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    applySuiteBody(body);
+    if (state.selectedId) {
+      await selectCase(state.selectedId);
+    }
   }
 
   $("reload").addEventListener("click", async () => {
@@ -330,6 +503,42 @@
   $("filter-split").addEventListener("change", renderList);
   $("filter-severity").addEventListener("change", renderList);
   $("filter-unlabeled").addEventListener("change", renderList);
+  $("filter-misses").addEventListener("change", renderList);
+  $("load-run").addEventListener("click", async () => {
+    try {
+      await loadRun($("run-path").value.trim());
+      setStatus($("run-path").value.trim() ? "Loaded run overlay." : "Cleared run overlay.", "ok");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error), "err");
+    }
+  });
+  $("clear-run").addEventListener("click", async () => {
+    try {
+      $("run-path").value = "";
+      await loadRun("");
+      setStatus("Cleared run overlay.", "ok");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error), "err");
+    }
+  });
+  $("run-select").addEventListener("change", async () => {
+    const path = $("run-select").value;
+    if (!path) {
+      return;
+    }
+    try {
+      $("run-path").value = path;
+      await loadRun(path);
+      setStatus("Loaded run overlay.", "ok");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error), "err");
+    }
+  });
+  $("run-path").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      $("load-run").click();
+    }
+  });
   $("save").addEventListener("click", () => {
     void save(false);
   });

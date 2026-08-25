@@ -18,7 +18,7 @@ Commands (also exported for `import { ingest } from "sysprompt-lab"`):
 | `promote` | Human accept (does not re-run the gate) |
 | `run --rung R0\|R1\|R2` | Optimize (forwards patch-mode and R1/R2 flags) |
 | `validate` | Card JSON or suite YAML/JSON |
-| `suite-viewer` | Localhost WebUI to inspect / label a suite (`--port`, `--image-dir`) |
+| `suite-viewer` | Localhost WebUI to inspect / label a suite (`--port`, `--image-dir`, `--run`, `--runs-dir`) |
 
 Patch-mode flags (`--rewrite-mode`, `--max-patch-ratio`, `--allow-full-rewrite` / `--no-allow-full-rewrite`) and student-eval flags (`--temperature`, `--max-tokens`) are parsed here and passed through. Do not drop them.
 
