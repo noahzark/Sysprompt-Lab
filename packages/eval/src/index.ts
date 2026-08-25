@@ -5,6 +5,7 @@ export {
   caseUserContent,
   caseUserText,
   casesForSplit,
+  completionDiagnostics,
   DEFAULT_IMAGE_USER_TEXT,
   evaluatePrompt,
   formatScoreTable,

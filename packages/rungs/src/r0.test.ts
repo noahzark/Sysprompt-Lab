@@ -91,7 +91,18 @@ cases:
           }),
         );
       }
-      return completion("hello there");
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: { content: "hello there", reasoning_content: "greet the user" },
+            },
+          ],
+          usage: { completion_tokens_details: { reasoning_tokens: 3 } },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     };
 
     const result = await runR0("mini", { root, fetch: fetchMock });
@@ -113,6 +124,17 @@ cases:
     expect(rawScores.length).toBeGreaterThan(0);
     for (const row of rawScores) {
       parseScore(row);
+    }
+    const caseRows = rawScores.filter(
+      (row): row is Record<string, unknown> =>
+        Boolean(row && typeof row === "object" && "case_id" in row),
+    );
+    expect(caseRows.length).toBeGreaterThan(0);
+    for (const row of caseRows) {
+      expect(row.output).toBe("hello there");
+      expect(row.reasoning).toBe("greet the user");
+      expect(row.finish_reason).toBe("stop");
+      expect(row.reasoning_tokens).toBe(3);
     }
 
     const card = parseCard(JSON.parse(readFileSync(join(root, ".spl", "cards", "mini.json"), "utf8")));

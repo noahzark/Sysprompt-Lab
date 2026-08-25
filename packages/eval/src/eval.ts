@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import type { LlmConfig } from "@sysprompt-lab/llm";
+import type { ChatCompletionResult, LlmConfig } from "@sysprompt-lab/llm";
 import {
   chatCompletion,
   imageFileToDataUrl,
@@ -159,10 +159,15 @@ export function mean(values: number[]): number {
 
 export interface CaseEvalResult {
   evalCase: EvalCase;
+  /** Visible student output. This is what the metric scores. */
   output: string;
   quality: number;
   note?: string;
   latency_ms: number;
+  /** Model chain-of-thought, if the API returned it. Never scored. */
+  reasoning?: string;
+  finish_reason?: string;
+  reasoning_tokens?: number;
 }
 
 export interface SplitEval {
@@ -199,6 +204,29 @@ export function resolveEvalSampling(
   };
 }
 
+/** Diagnostic extras from a student completion. Omitted when the API did not send them. */
+export function completionDiagnostics(result: ChatCompletionResult): {
+  reasoning?: string;
+  finish_reason?: string;
+  reasoning_tokens?: number;
+} {
+  const extras: {
+    reasoning?: string;
+    finish_reason?: string;
+    reasoning_tokens?: number;
+  } = {};
+  if (result.reasoning) {
+    extras.reasoning = result.reasoning;
+  }
+  if (result.finish_reason) {
+    extras.finish_reason = result.finish_reason;
+  }
+  if (typeof result.reasoning_tokens === "number") {
+    extras.reasoning_tokens = result.reasoning_tokens;
+  }
+  return extras;
+}
+
 export async function evaluatePrompt(options: EvaluatePromptOptions): Promise<SplitEval> {
   const cases = casesForSplit(options.suite, options.split);
   const sampling = resolveEvalSampling(options.suite, {
@@ -221,6 +249,7 @@ export async function evaluatePrompt(options: EvaluatePromptOptions): Promise<Sp
       { temperature: sampling.temperature, max_tokens: sampling.max_tokens, fetch: options.fetch },
     );
     const { quality, note } = scoreCase(options.suite.metric, result.content, evalCase.gold);
+    const diagnostics = completionDiagnostics(result);
     scores.push({
       quality,
       latency_ms: result.latency_ms,
@@ -229,6 +258,8 @@ export async function evaluatePrompt(options: EvaluatePromptOptions): Promise<Sp
       metric_id: options.suite.metric.id,
       version_id: options.versionId,
       case_id: evalCase.id,
+      output: result.content,
+      ...diagnostics,
     });
     caseResults.push({
       evalCase,
@@ -236,6 +267,7 @@ export async function evaluatePrompt(options: EvaluatePromptOptions): Promise<Sp
       quality,
       note,
       latency_ms: result.latency_ms,
+      ...diagnostics,
     });
   }
   return {
