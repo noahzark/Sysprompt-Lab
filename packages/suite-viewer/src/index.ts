@@ -16,6 +16,7 @@ export {
 export type { ImageResolveResult } from "./paths.js";
 export {
   UNLABELED_BUCKET,
+  attachPredictions,
   buildCaseDetail,
   buildCaseSummaries,
   buildOverview,
@@ -43,3 +44,22 @@ export type {
   SuiteViewerPayload,
 } from "./server.js";
 export { SUITE_VIEWER_HELP, registerSuiteViewerCommand, runSuiteViewerCli } from "./command.js";
+export {
+  RUN_FILE_NAMES,
+  RunArtifactError,
+  joinRunToSuite,
+  listRunArtifacts,
+  loadRunArtifactFromFile,
+  parseRunArtifact,
+  predictedDisplayLabel,
+  summarizeJoinedRun,
+} from "./run.js";
+export type {
+  JoinedCasePrediction,
+  ParsedRunArtifact,
+  PredictionStatus,
+  RunArtifactKind,
+  RunCaseRow,
+  RunListItem,
+  RunOverlaySummary,
+} from "./run.js";

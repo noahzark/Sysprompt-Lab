@@ -1,10 +1,10 @@
-import { mkdtempSync, writeFileSync, copyFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, copyFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { findRepoRoot, loadSuiteFromFile } from "@sysprompt-lab/core";
-import { listenSuiteViewer, type SuiteViewerHandle } from "./server.js";
+import { listenSuiteViewer, type SuiteViewerHandle, type SuiteViewerOptions } from "./server.js";
 
 const repo = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 const supportSuite = join(repo, "examples", "support-bot", "suite.yaml");
@@ -19,12 +19,15 @@ afterEach(async () => {
   }
 });
 
-async function start(suitePath: string, imageDir?: string): Promise<SuiteViewerHandle> {
+async function start(
+  suitePath: string,
+  extras: Partial<SuiteViewerOptions> = {},
+): Promise<SuiteViewerHandle> {
   const handle = await listenSuiteViewer({
     suitePath,
     host: "127.0.0.1",
     port: 0,
-    imageDir,
+    ...extras,
   });
   handles.push(handle);
   return handle;
@@ -81,7 +84,7 @@ describe("suite viewer HTTP smoke", () => {
     );
     copyFileSync(tinyPng, join(dir, "tiny.png"));
 
-    const handle = await start(suitePath, dir);
+    const handle = await start(suitePath, { imageDir: dir });
     const suite = await (await fetch(`${handle.url}/api/suite`)).json();
     expect(suite.overview.missingImageCount).toBe(0);
     expect(suite.cases[0]?.imageResolved).toBe(true);
@@ -111,5 +114,155 @@ describe("suite viewer HTTP smoke", () => {
     });
     expect(bad.status).toBe(400);
     expect(await bad.text()).toMatch(/Invalid NSFW severity/);
+  });
+});
+
+describe("suite viewer run overlay", () => {
+  const scores = [
+    {
+      quality: 1,
+      split: "train",
+      model_id: "gpt-x",
+      metric_id: "string_contains",
+      version_id: "ver_1",
+      case_id: "greet-hello",
+      output: "happy to help you",
+      reasoning: "greet the shopper",
+      finish_reason: "stop",
+      reasoning_tokens: 5,
+    },
+    {
+      quality: 0,
+      split: "train",
+      model_id: "gpt-x",
+      metric_id: "string_contains",
+      version_id: "ver_1",
+      case_id: "refund-ask",
+      output: "I cannot help with that",
+      note: "missed 30-day",
+    },
+    {
+      quality: 0.5,
+      split: "train",
+      model_id: "gpt-x",
+      metric_id: "string_contains",
+    },
+  ];
+
+  const report = {
+    model: "local-qwen",
+    temperature: 0,
+    splits: {
+      train: {
+        meanQuality: 1,
+        cases: [{ id: "greet-hello", gold: "happy to help", quality: 1, output: "happy to help" }],
+      },
+      val: {
+        meanQuality: 0,
+        cases: [{ id: "greet-hi", gold: "help", quality: 0, output: "hello", note: "too short" }],
+      },
+    },
+  };
+
+  it("includes traj fields on /api/suite and /api/cases when --run is a scores.json", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spl-viewer-run-"));
+    const runPath = join(dir, "scores.json");
+    writeFileSync(runPath, JSON.stringify(scores), "utf8");
+
+    const handle = await start(supportSuite, { runPath });
+    const suiteRes = await fetch(`${handle.url}/api/suite`);
+    expect(suiteRes.ok).toBe(true);
+    const body = (await suiteRes.json()) as {
+      run: { model?: string; missCount: number; hitCount: number; kind: string };
+      cases: Array<{
+        id: string;
+        prediction?: {
+          status: string;
+          output?: string;
+          reasoning?: string;
+          finish_reason?: string;
+          reasoning_tokens?: number;
+          note?: string;
+        };
+      }>;
+    };
+    expect(body.run.kind).toBe("scores");
+    expect(body.run.model).toBe("gpt-x");
+    expect(body.run.hitCount).toBe(1);
+    expect(body.run.missCount).toBe(1);
+    const greet = body.cases.find((item) => item.id === "greet-hello");
+    expect(greet?.prediction).toMatchObject({
+      status: "ok",
+      output: "happy to help you",
+      reasoning: "greet the shopper",
+      finish_reason: "stop",
+      reasoning_tokens: 5,
+    });
+    const refund = body.cases.find((item) => item.id === "refund-ask");
+    expect(refund?.prediction).toMatchObject({
+      status: "miss",
+      output: "I cannot help with that",
+      note: "missed 30-day",
+    });
+    const missing = body.cases.find((item) => item.id === "hours-ask");
+    expect(missing?.prediction).toEqual({ status: "none" });
+
+    const detail = await (await fetch(`${handle.url}/api/cases/greet-hello`)).json();
+    expect(detail.case.prediction.reasoning).toBe("greet the shopper");
+    expect(detail.case.prediction.finish_reason).toBe("stop");
+    expect(detail.run.model).toBe("gpt-x");
+  });
+
+  it("lists report.json under --runs-dir and does not mutate the report on save", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spl-viewer-runs-"));
+    const suitePath = join(dir, "suite.yaml");
+    writeFileSync(
+      suitePath,
+      [
+        "id: tmp-run",
+        "name: tmp-run",
+        "metric:",
+        "  id: string_contains",
+        "  kind: custom",
+        "  returns_feedback: false",
+        "splits:",
+        "  train:",
+        "    - greet-hello",
+        "  val: []",
+        "cases:",
+        "  - id: greet-hello",
+        "    input:",
+        "      user: Hello",
+        "    gold: happy to help",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const runPath = join(dir, "report.json");
+    const original = `${JSON.stringify(report, null, 2)}\n`;
+    writeFileSync(runPath, original, "utf8");
+
+    const handle = await start(suitePath, { runPath, runsDir: dir });
+    const listed = await (await fetch(`${handle.url}/api/runs`)).json();
+    expect(listed.runs.some((item: { name: string }) => item.name === "report.json")).toBe(true);
+
+    const suite = await (await fetch(`${handle.url}/api/suite`)).json();
+    expect(suite.run.kind).toBe("report");
+    expect(suite.cases[0]?.prediction?.status).toBe("ok");
+
+    const save = await fetch(`${handle.url}/api/cases/greet-hello`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gold: "happy to help always",
+        notes: "tweaked gold",
+        expectedMtimeMs: suite.mtimeMs,
+      }),
+    });
+    expect(save.ok).toBe(true);
+    const savedBody = await save.json();
+    expect(savedBody.suite.cases[0]?.prediction?.output).toBe("happy to help");
+    expect(readFileSync(runPath, "utf8")).toBe(original);
+    expect(loadSuiteFromFile(suitePath).cases[0]?.gold).toBe("happy to help always");
   });
 });
