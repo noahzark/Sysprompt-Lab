@@ -28,7 +28,7 @@ TypeScript is an npm workspace. Dependency direction is `cli → rungs → rewri
 | `packages/rewrite` | Full rewrite + section/patch apply + R0/R1 meta-prompts |
 | `packages/rungs` | R0 / R1 / R2 orchestration only (`r0.ts` / `r1.ts` / `r2.ts`) |
 | `packages/cli` | `sysprompt` / `spl` bins, ingest / bind / export / promote / run / suite-viewer |
-| `packages/suite-viewer` | Localhost WebUI to inspect / label a suite (no cloud, no image benches) |
+| `packages/suite-viewer` | Localhost WebUI to inspect / label a suite; optional read-only run overlay (no cloud, no image benches) |
 | `python/` | `python -m sysprompt_gepa` sidecar (stdin/stdout JSON job) |
 | `schemas/` | draft-07 sources of truth |
 | `examples/` | Ingestable cards; `support-bot` must keep working |

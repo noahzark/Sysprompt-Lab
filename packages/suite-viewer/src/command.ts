@@ -7,12 +7,14 @@ import {
   DEFAULT_VIEWER_PORT,
   listenSuiteViewer,
 } from "./server.js";
+import { loadRunArtifactFromFile } from "./run.js";
 
 export const SUITE_VIEWER_HELP = [
   "Local Suite Viewer WebUI — inspect and manually label an eval suite.",
-  "Binds 127.0.0.1 only by default (no cloud, no auth).",
+  "Binds 127.0.0.1 only by default (no cloud, no auth, no model eval from the UI).",
   "Images stay on disk (suite-relative paths or SYSPROMPT_IMAGE_DIR / --image-dir).",
-  "Save writes gold and optional notes (feedback) atomically back to the suite file.",
+  "Optional --run overlays one saved report.json / scores.json (read-only) so you can inspect misses.",
+  "Save writes gold and optional notes (feedback) atomically back to the suite file; it does not mutate the report.",
   "Do not commit NSFW images or real benches; point this at a private suite path.",
 ].join(" ");
 
@@ -30,7 +32,7 @@ function isLoopback(host: string): boolean {
 
 async function runViewer(
   suite: string,
-  opts: { port?: string; host?: string; imageDir?: string },
+  opts: { port?: string; host?: string; imageDir?: string; run?: string; runsDir?: string },
   root?: string,
 ): Promise<void> {
   loadEnvFiles({ cwd: process.cwd(), root });
@@ -41,6 +43,17 @@ async function runViewer(
   const host = opts.host?.trim() || DEFAULT_VIEWER_HOST;
   const port = parsePort(opts.port ?? String(DEFAULT_VIEWER_PORT));
   const imageDir = opts.imageDir?.trim() || process.env.SYSPROMPT_IMAGE_DIR?.trim();
+  const runPath = opts.run?.trim() ? resolve(process.cwd(), opts.run.trim()) : undefined;
+  const runsDir = opts.runsDir?.trim() ? resolve(process.cwd(), opts.runsDir.trim()) : undefined;
+  if (runPath) {
+    if (!existsSync(runPath)) {
+      throw new Error(`Run file not found: ${runPath}`);
+    }
+    loadRunArtifactFromFile(runPath);
+  }
+  if (runsDir && !existsSync(runsDir)) {
+    throw new Error(`Runs directory not found: ${runsDir}`);
+  }
   if (!isLoopback(host)) {
     console.warn(
       `Warning: binding ${host} is not localhost-only. The viewer can read local images and write the suite file.`,
@@ -51,9 +64,17 @@ async function runViewer(
     host,
     port,
     imageDir: imageDir || undefined,
+    runPath,
+    runsDir,
   });
   console.log(`Suite Viewer  ${handle.url}`);
   console.log(`Suite         ${suitePath}`);
+  if (runPath) {
+    console.log(`Run           ${runPath} (read-only overlay)`);
+  }
+  if (runsDir) {
+    console.log(`Runs dir      ${runsDir}`);
+  }
   if (imageDir) {
     console.log(`Images        ${resolve(process.cwd(), imageDir)}`);
   }
@@ -75,17 +96,22 @@ export function configureSuiteViewerCommand(cmd: Command): Command {
     .option("--port <n>", `listen port (default ${DEFAULT_VIEWER_PORT})`, String(DEFAULT_VIEWER_PORT))
     .option("--host <host>", `bind address (default ${DEFAULT_VIEWER_HOST}, localhost only)`, DEFAULT_VIEWER_HOST)
     .option("--image-dir <dir>", "local image root (also SYSPROMPT_IMAGE_DIR)")
+    .option("--run <file>", "eval run artifact to overlay (report.json or scores.json); read-only")
+    .option("--runs-dir <dir>", "folder of report.json / scores.json files the UI can switch")
     .addHelpText(
       "after",
       `
 Examples:
   npm run suite-viewer -- examples/support-bot/suite.yaml
   npm run sysprompt -- suite-viewer /path/to/private/suite.yaml --port 8787 --image-dir /path/to/images
+  npm run suite-viewer -- examples/support-bot/suite.yaml --run /path/to/report.json
+  npm run suite-viewer -- /path/to/private/suite.yaml --run scores.json --runs-dir .spl/runs
 
 Opens http://127.0.0.1:8787 by default. Reload after editing the file elsewhere.
-Save confirms if the suite mtime changed on disk. Images are never uploaded.`,
+Save confirms if the suite mtime changed on disk and writes the suite only (never the run file).
+Images are never uploaded. The run overlay does not start a new eval.`,
     )
-    .action(async (suite: string, opts: { port?: string; host?: string; imageDir?: string }, command: Command) => {
+    .action(async (suite: string, opts: { port?: string; host?: string; imageDir?: string; run?: string; runsDir?: string }, command: Command) => {
       const root =
         typeof command.parent?.opts === "function"
           ? (command.parent.opts() as { root?: string }).root

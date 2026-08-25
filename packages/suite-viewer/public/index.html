@@ -15,6 +15,19 @@
       <div id="chips" class="chips" aria-live="polite"></div>
       <button type="button" id="reload" class="btn">Reload</button>
     </header>
+    <div class="run-bar">
+      <label class="run-path-label">
+        Run overlay
+        <input id="run-path" type="text" spellcheck="false" placeholder="report.json or scores.json (read-only)" />
+      </label>
+      <label id="run-select-wrap" hidden>
+        Switch
+        <select id="run-select"></select>
+      </label>
+      <button type="button" id="load-run" class="btn">Load run</button>
+      <button type="button" id="clear-run" class="btn">Clear</button>
+      <span id="run-meta" class="run-meta"></span>
+    </div>
     <main class="layout">
       <aside class="pane list-pane">
         <div class="filters">
@@ -37,6 +50,10 @@
             <input type="checkbox" id="filter-unlabeled" />
             Unlabeled only
           </label>
+          <label class="check">
+            <input type="checkbox" id="filter-misses" />
+            Misses only
+          </label>
         </div>
         <ul id="case-list" class="case-list"></ul>
       </aside>
@@ -47,7 +64,36 @@
             <h1 id="case-id"></h1>
             <span id="case-split" class="chip"></span>
             <span id="case-image-chip" class="chip" hidden></span>
+            <span id="traj-status" class="chip" hidden></span>
           </div>
+          <section id="traj" hidden>
+            <p class="hint">Run overlay is read-only. Save writes the suite file only.</p>
+            <div class="compare">
+              <label class="block">
+                Gold
+                <pre id="traj-gold" class="box"></pre>
+              </label>
+              <label class="block">
+                Predicted
+                <pre id="traj-pred" class="box"></pre>
+              </label>
+            </div>
+            <p id="traj-note" class="traj-note" hidden></p>
+            <details id="traj-reasoning" hidden>
+              <summary>Reasoning / diagnostics</summary>
+              <dl class="diag">
+                <div id="traj-finish-wrap" hidden>
+                  <dt>finish_reason</dt>
+                  <dd id="traj-finish"></dd>
+                </div>
+                <div id="traj-tokens-wrap" hidden>
+                  <dt>reasoning_tokens</dt>
+                  <dd id="traj-tokens"></dd>
+                </div>
+              </dl>
+              <pre id="traj-reasoning-text" class="box"></pre>
+            </details>
+          </section>
           <figure id="image-wrap" hidden>
             <img id="case-image" alt="Case image" />
             <figcaption id="image-caption"></figcaption>

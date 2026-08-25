@@ -10,6 +10,7 @@ import {
 } from "@sysprompt-lab/eval";
 import { isNsfwMetric, isUnlabeledGold } from "./gold.js";
 import { caseImageResolve } from "./paths.js";
+import type { JoinedCasePrediction, RunOverlaySummary } from "./run.js";
 
 export const UNLABELED_BUCKET = "(unlabeled)";
 
@@ -24,6 +25,7 @@ export interface SuiteOverview {
   unlabeledCount: number;
   missingImageCount: number;
   goldHistogram: Record<string, number>;
+  run?: RunOverlaySummary;
 }
 
 export interface CaseSummary {
@@ -38,6 +40,8 @@ export interface CaseSummary {
   unlabeled: boolean;
   preview: string;
   notes?: string;
+  /** Present only when a run overlay is attached. */
+  prediction?: JoinedCasePrediction;
 }
 
 export interface CaseDetail extends CaseSummary {
@@ -167,4 +171,17 @@ export function imageOptionsForSuite(
     imageDir,
     suiteDir: dirname(suitePath),
   };
+}
+
+export function attachPredictions(
+  cases: CaseSummary[],
+  joined: Map<string, JoinedCasePrediction> | undefined,
+): CaseSummary[] {
+  if (!joined) {
+    return cases;
+  }
+  return cases.map((item) => ({
+    ...item,
+    prediction: joined.get(item.id) ?? { status: "none" },
+  }));
 }

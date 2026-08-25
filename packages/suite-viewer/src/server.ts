@@ -5,12 +5,23 @@ import { fileURLToPath } from "node:url";
 import { loadSuiteFromFile, type EvalSuite } from "@sysprompt-lab/core";
 import { GoldUpdateError, NSFW_SEVERITY_TAGS, isNsfwMetric, type CaseGoldUpdate } from "./gold.js";
 import {
+  attachPredictions,
   buildCaseDetail,
   buildCaseSummaries,
   buildOverview,
   imageOptionsForSuite,
 } from "./model.js";
 import { caseImageResolve } from "./paths.js";
+import {
+  RunArtifactError,
+  joinRunToSuite,
+  listRunArtifacts,
+  loadRunArtifactFromFile,
+  resolveRunPath,
+  summarizeJoinedRun,
+  type ParsedRunArtifact,
+  type RunListItem,
+} from "./run.js";
 import { SuiteConflictError, saveSuiteCase, suiteMtimeMs } from "./save.js";
 
 export const DEFAULT_VIEWER_HOST = "127.0.0.1";
@@ -35,6 +46,14 @@ const IMAGE_TYPES: Record<string, string> = {
 export interface SuiteViewerOptions {
   suitePath: string;
   imageDir?: string;
+  /** One eval report / scores.json to overlay (read-only). */
+  runPath?: string;
+  /** Folder of report.json / scores.json files the UI can switch among. */
+  runsDir?: string;
+}
+
+export interface ViewerSession extends SuiteViewerOptions {
+  runPath?: string;
 }
 
 export interface ListenSuiteViewerOptions extends SuiteViewerOptions {
@@ -55,6 +74,8 @@ export interface SuiteViewerPayload {
   overview: ReturnType<typeof buildOverview>;
   cases: ReturnType<typeof buildCaseSummaries>;
   nsfwTags: readonly string[];
+  run?: ReturnType<typeof summarizeJoinedRun> & { error?: string };
+  runs: RunListItem[];
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -103,15 +124,67 @@ function loadViewerSuite(options: SuiteViewerOptions): {
   };
 }
 
+function listedRuns(options: SuiteViewerOptions): RunListItem[] {
+  if (!options.runsDir) {
+    return [];
+  }
+  try {
+    return listRunArtifacts(options.runsDir);
+  } catch {
+    return [];
+  }
+}
+
+function tryLoadRun(options: SuiteViewerOptions): {
+  artifact?: ParsedRunArtifact;
+  error?: string;
+} {
+  if (!options.runPath) {
+    return {};
+  }
+  try {
+    return { artifact: loadRunArtifactFromFile(options.runPath) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { error: message };
+  }
+}
+
 function suitePayload(options: SuiteViewerOptions): SuiteViewerPayload {
   const { suite, mtimeMs, imageOptions } = loadViewerSuite(options);
-  const cases = buildCaseSummaries(suite, imageOptions);
+  const nsfw = isNsfwMetric(suite.metric);
+  let cases = buildCaseSummaries(suite, imageOptions);
+  const overview = buildOverview(suite, cases);
+  const loaded = tryLoadRun(options);
+  let run: SuiteViewerPayload["run"];
+  if (loaded.artifact) {
+    const joined = joinRunToSuite(
+      suite.cases.map((item) => item.id),
+      loaded.artifact,
+      nsfw,
+    );
+    cases = attachPredictions(cases, joined);
+    run = summarizeJoinedRun(loaded.artifact, joined);
+    overview.run = run;
+  } else if (loaded.error) {
+    run = {
+      kind: "scores",
+      hitCount: 0,
+      missCount: 0,
+      errorCount: 0,
+      noneCount: cases.length,
+      error: loaded.error,
+      path: options.runPath,
+    };
+  }
   return {
     path: options.suitePath,
     mtimeMs,
-    overview: buildOverview(suite, cases),
+    overview,
     cases,
     nsfwTags: NSFW_SEVERITY_TAGS,
+    run,
+    runs: listedRuns(options),
   };
 }
 
@@ -210,14 +283,29 @@ function parseSaveBody(body: unknown): CaseGoldUpdate & {
   return update;
 }
 
+function parseRunBody(body: unknown): { path?: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new RunArtifactError("Run body must be a JSON object");
+  }
+  const obj = body as { path?: unknown };
+  if (obj.path === undefined || obj.path === null || obj.path === "") {
+    return {};
+  }
+  if (typeof obj.path !== "string") {
+    throw new RunArtifactError("path must be a string");
+  }
+  return { path: obj.path };
+}
+
 export function createSuiteViewerListener(options: SuiteViewerOptions): RequestListener {
+  const session: ViewerSession = { ...options };
   return (req, res) => {
-    void handleRequest(options, req, res);
+    void handleRequest(session, req, res);
   };
 }
 
 async function handleRequest(
-  options: SuiteViewerOptions,
+  options: ViewerSession,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
@@ -238,6 +326,23 @@ async function handleRequest(
       sendJson(res, 200, suitePayload(options));
       return;
     }
+    if (method === "GET" && pathname === "/api/runs") {
+      sendJson(res, 200, { runs: listedRuns(options), runPath: options.runPath ?? null });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/run") {
+      const body = parseRunBody(await readJsonBody(req));
+      if (!body.path) {
+        options.runPath = undefined;
+        sendJson(res, 200, suitePayload(options));
+        return;
+      }
+      const resolved = resolveRunPath(body.path);
+      loadRunArtifactFromFile(resolved);
+      options.runPath = resolved;
+      sendJson(res, 200, suitePayload(options));
+      return;
+    }
 
     const caseImage = pathname.match(/^\/api\/cases\/([^/]+)\/image$/);
     if (method === "GET" && caseImage) {
@@ -255,13 +360,36 @@ async function handleRequest(
           sendJson(res, 404, { error: `Unknown case "${caseId}"` });
           return;
         }
-        const detail = buildCaseDetail(suite, found.evalCase, found.split, imageOptions);
+        const nsfw = isNsfwMetric(suite.metric);
+        let detail = buildCaseDetail(suite, found.evalCase, found.split, imageOptions);
+        const loaded = tryLoadRun(options);
+        let run: SuiteViewerPayload["run"];
+        if (loaded.artifact) {
+          const joined = joinRunToSuite(
+            suite.cases.map((item) => item.id),
+            loaded.artifact,
+            nsfw,
+          );
+          detail = { ...detail, prediction: joined.get(found.evalCase.id) ?? { status: "none" } };
+          run = summarizeJoinedRun(loaded.artifact, joined);
+        } else if (loaded.error) {
+          run = {
+            kind: "scores",
+            hitCount: 0,
+            missCount: 0,
+            errorCount: 0,
+            noneCount: suite.cases.length,
+            error: loaded.error,
+            path: options.runPath,
+          };
+        }
         sendJson(res, 200, {
           path: options.suitePath,
           mtimeMs,
-          nsfw: isNsfwMetric(suite.metric),
+          nsfw,
           nsfwTags: NSFW_SEVERITY_TAGS,
           case: detail,
+          run,
         });
         return;
       }
@@ -282,7 +410,11 @@ async function handleRequest(
       sendJson(res, 409, { error: error.message, conflict: true, mtimeMs: error.mtimeMs });
       return;
     }
-    if (error instanceof GoldUpdateError || (error instanceof SyntaxError && error.message.includes("JSON"))) {
+    if (
+      error instanceof GoldUpdateError ||
+      error instanceof RunArtifactError ||
+      (error instanceof SyntaxError && error.message.includes("JSON"))
+    ) {
       sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
       return;
     }
