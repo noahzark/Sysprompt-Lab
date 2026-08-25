@@ -30,26 +30,124 @@ def mask_token(token: str) -> str:
 
 
 def extract_content(data: Any) -> str:
+    return parse_chat_completion(data)["content"]
+
+
+def parse_chat_completion(data: Any) -> dict[str, Any]:
+    """Parse an OpenAI-compatible chat/completions body.
+
+    Visible ``content`` is what metrics score. ``reasoning`` is diagnostic only.
+    Empty content is allowed when reasoning is present (thinking models).
+    """
     if not isinstance(data, dict):
         raise RuntimeError("LLM chat/completions returned a non-object body")
     choices = data.get("choices")
     if not isinstance(choices, list) or not choices:
         raise RuntimeError("LLM chat/completions returned no choices")
-    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    choice = choices[0] if isinstance(choices[0], dict) else None
+    message = choice.get("message") if isinstance(choice, dict) else None
     raw = message.get("content") if isinstance(message, dict) else None
-    if isinstance(raw, str) and raw:
-        return raw
+    text, present = _visible_content(raw)
+    reasoning = _message_reasoning(message if isinstance(message, dict) else None, raw)
+    if not present and not reasoning:
+        raise RuntimeError("LLM chat/completions returned empty message content")
+    parsed: dict[str, Any] = {"content": text if present else ""}
+    if reasoning:
+        parsed["reasoning"] = reasoning
+    finish_reason = _finish_reason(choice if isinstance(choice, dict) else None)
+    if finish_reason:
+        parsed["finish_reason"] = finish_reason
+    reasoning_tokens = _reasoning_tokens(data)
+    if reasoning_tokens is not None:
+        parsed["reasoning_tokens"] = reasoning_tokens
+    return parsed
+
+
+_MESSAGE_REASONING_KEYS = (
+    "reasoning_content",
+    "reasoning",
+    "thinking",
+    "thinking_content",
+    "reasoning_text",
+)
+
+
+def _as_non_empty_str(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, dict):
+        content = value.get("content")
+        if isinstance(content, str) and content:
+            return content
+        text = value.get("text")
+        if isinstance(text, str) and text:
+            return text
+    return None
+
+
+def _part_type(part: dict[str, Any]) -> str:
+    raw = part.get("type")
+    return raw.lower() if isinstance(raw, str) else ""
+
+
+def _is_reasoning_part(type_name: str) -> bool:
+    return type_name in {"reasoning", "thinking", "thought"}
+
+
+def _visible_content(raw: Any) -> tuple[str, bool]:
+    if isinstance(raw, str):
+        return raw, True
     if isinstance(raw, list):
         parts: list[str] = []
         for part in raw:
             if isinstance(part, str):
                 parts.append(part)
-            elif isinstance(part, dict) and isinstance(part.get("text"), str):
-                parts.append(part["text"])
-        text = "".join(parts)
-        if text:
-            return text
-    raise RuntimeError("LLM chat/completions returned empty message content")
+            elif isinstance(part, dict) and not _is_reasoning_part(_part_type(part)):
+                text = part.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts), True
+    return "", False
+
+
+def _message_reasoning(message: dict[str, Any] | None, content: Any) -> str | None:
+    if message:
+        for key in _MESSAGE_REASONING_KEYS:
+            found = _as_non_empty_str(message.get(key))
+            if found:
+                return found
+    if isinstance(content, list):
+        from_parts: list[str] = []
+        for part in content:
+            if not isinstance(part, dict) or not _is_reasoning_part(_part_type(part)):
+                continue
+            found = _as_non_empty_str(part.get("text")) or _as_non_empty_str(part.get("thinking"))
+            if found:
+                from_parts.append(found)
+        if from_parts:
+            return "".join(from_parts)
+    return None
+
+
+def _finish_reason(choice: dict[str, Any] | None) -> str | None:
+    if not choice:
+        return None
+    return _as_non_empty_str(choice.get("finish_reason")) or _as_non_empty_str(choice.get("finishReason"))
+
+
+def _reasoning_tokens(data: dict[str, Any]) -> float | int | None:
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, dict):
+        nested = details.get("reasoning_tokens", details.get("reasoning"))
+        if isinstance(nested, (int, float)):
+            return nested
+    top = usage.get("reasoning_tokens")
+    if isinstance(top, (int, float)):
+        return top
+    return None
 
 
 def chat_completion(

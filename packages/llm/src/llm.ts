@@ -24,8 +24,17 @@ export interface ChatMessage {
   content: ChatMessageContent;
 }
 
-export interface ChatCompletionResult {
+/** Parsed chat/completions body, before latency is attached. */
+export interface ParsedChatCompletion {
+  /** Visible assistant text (scored). Empty string when the model only returned reasoning. */
   content: string;
+  /** Chain-of-thought / thinking, if the API provided it. Never scored. */
+  reasoning?: string;
+  finish_reason?: string;
+  reasoning_tokens?: number;
+}
+
+export interface ChatCompletionResult extends ParsedChatCompletion {
   latency_ms: number;
 }
 
@@ -104,36 +113,157 @@ function redactSecret(text: string, token: string): string {
   return token ? text.split(token).join("[redacted]") : text;
 }
 
-function extractContent(data: unknown): string {
+function asNonEmptyString(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    const obj = value as { content?: unknown; text?: unknown };
+    if (typeof obj.content === "string" && obj.content.length > 0) {
+      return obj.content;
+    }
+    if (typeof obj.text === "string" && obj.text.length > 0) {
+      return obj.text;
+    }
+  }
+  return undefined;
+}
+
+function partType(part: object): string {
+  const type = (part as { type?: unknown }).type;
+  return typeof type === "string" ? type.toLowerCase() : "";
+}
+
+function isReasoningPartType(type: string): boolean {
+  return type === "reasoning" || type === "thinking" || type === "thought";
+}
+
+function visiblePartText(part: unknown): string {
+  if (typeof part === "string") {
+    return part;
+  }
+  if (!part || typeof part !== "object") {
+    return "";
+  }
+  if (isReasoningPartType(partType(part))) {
+    return "";
+  }
+  const text = (part as { text?: unknown }).text;
+  return typeof text === "string" ? text : "";
+}
+
+function reasoningPartText(part: unknown): string | undefined {
+  if (!part || typeof part !== "object") {
+    return undefined;
+  }
+  if (!isReasoningPartType(partType(part))) {
+    return undefined;
+  }
+  const obj = part as { text?: unknown; thinking?: unknown };
+  return asNonEmptyString(obj.text) ?? asNonEmptyString(obj.thinking);
+}
+
+function extractVisibleContent(raw: unknown): { text: string; present: boolean } {
+  if (typeof raw === "string") {
+    return { text: raw, present: true };
+  }
+  if (Array.isArray(raw)) {
+    return { text: raw.map(visiblePartText).join(""), present: true };
+  }
+  return { text: "", present: false };
+}
+
+const MESSAGE_REASONING_KEYS = [
+  "reasoning_content",
+  "reasoning",
+  "thinking",
+  "thinking_content",
+  "reasoning_text",
+] as const;
+
+function extractMessageReasoning(message: Record<string, unknown> | undefined, content: unknown): string | undefined {
+  if (message) {
+    for (const key of MESSAGE_REASONING_KEYS) {
+      const found = asNonEmptyString(message[key]);
+      if (found) {
+        return found;
+      }
+    }
+  }
+  if (Array.isArray(content)) {
+    const fromParts = content.map(reasoningPartText).filter((part): part is string => Boolean(part));
+    if (fromParts.length > 0) {
+      return fromParts.join("");
+    }
+  }
+  return undefined;
+}
+
+function extractFinishReason(choice: Record<string, unknown> | undefined): string | undefined {
+  if (!choice) {
+    return undefined;
+  }
+  return asNonEmptyString(choice.finish_reason) ?? asNonEmptyString(choice.finishReason);
+}
+
+function extractReasoningTokens(data: Record<string, unknown>): number | undefined {
+  const usage = data.usage;
+  if (!usage || typeof usage !== "object") {
+    return undefined;
+  }
+  const record = usage as Record<string, unknown>;
+  const details = record.completion_tokens_details;
+  if (details && typeof details === "object") {
+    const nested = details as Record<string, unknown>;
+    const fromDetails = nested.reasoning_tokens ?? nested.reasoning;
+    if (typeof fromDetails === "number" && Number.isFinite(fromDetails)) {
+      return fromDetails;
+    }
+  }
+  const top = record.reasoning_tokens;
+  if (typeof top === "number" && Number.isFinite(top)) {
+    return top;
+  }
+  return undefined;
+}
+
+/**
+ * Parse an OpenAI-compatible chat/completions JSON body.
+ * Visible `content` is scored; `reasoning` is diagnostic only.
+ * Empty content is allowed when reasoning is present (thinking models).
+ */
+export function parseChatCompletion(data: unknown): ParsedChatCompletion {
   if (!data || typeof data !== "object") {
     throw new Error("LLM chat/completions returned a non-object body");
   }
-  const choices = (data as { choices?: unknown }).choices;
+  const body = data as Record<string, unknown>;
+  const choices = body.choices;
   if (!Array.isArray(choices) || choices.length === 0) {
     throw new Error("LLM chat/completions returned no choices");
   }
-  const message = (choices[0] as { message?: { content?: unknown } } | undefined)?.message;
-  const raw = message?.content;
-  if (typeof raw === "string") {
-    return raw;
+  const choice = choices[0] && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>) : undefined;
+  const message =
+    choice?.message && typeof choice.message === "object"
+      ? (choice.message as Record<string, unknown>)
+      : undefined;
+  const { text, present } = extractVisibleContent(message?.content);
+  const reasoning = extractMessageReasoning(message, message?.content);
+  if (!present && !reasoning) {
+    throw new Error("LLM chat/completions returned empty message content");
   }
-  if (Array.isArray(raw)) {
-    const text = raw
-      .map((part) => {
-        if (typeof part === "string") {
-          return part;
-        }
-        if (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string") {
-          return (part as { text: string }).text;
-        }
-        return "";
-      })
-      .join("");
-    if (text) {
-      return text;
-    }
+  const parsed: ParsedChatCompletion = { content: present ? text : "" };
+  if (reasoning) {
+    parsed.reasoning = reasoning;
   }
-  throw new Error("LLM chat/completions returned empty message content");
+  const finishReason = extractFinishReason(choice);
+  if (finishReason) {
+    parsed.finish_reason = finishReason;
+  }
+  const reasoningTokens = extractReasoningTokens(body);
+  if (reasoningTokens !== undefined) {
+    parsed.reasoning_tokens = reasoningTokens;
+  }
+  return parsed;
 }
 
 /**
@@ -189,5 +319,5 @@ export async function chatCompletion(
   } catch {
     throw new Error(`LLM chat/completions returned non-JSON at ${url}`);
   }
-  return { content: extractContent(data), latency_ms };
+  return { ...parseChatCompletion(data), latency_ms };
 }

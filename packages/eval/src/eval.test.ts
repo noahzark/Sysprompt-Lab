@@ -17,7 +17,7 @@ import {
   scoreNsfwSeverityTag,
 } from "@sysprompt-lab/eval";
 import type { EvalSuite, Metric } from "@sysprompt-lab/core";
-import { findRepoRoot } from "@sysprompt-lab/core";
+import { findRepoRoot, parseScore } from "@sysprompt-lab/core";
 import type { LlmConfig } from "@sysprompt-lab/llm";
 
 const exact: Metric = { id: "exact", kind: "exact", returns_feedback: false };
@@ -232,6 +232,116 @@ describe("evaluatePrompt sampling", () => {
     expect(body.messages[0].content).toBe("tag");
     expect(body.messages[1].content[0]).toEqual({ type: "text", text: DEFAULT_IMAGE_USER_TEXT });
     expect(body.messages[1].content[1].type).toBe("image_url");
+  });
+});
+
+describe("evaluatePrompt reasoning traces", () => {
+  const suite: EvalSuite = {
+    id: "trace",
+    name: "trace",
+    metric: exact,
+    splits: {
+      train: { name: "train", case_ids: ["c1"] },
+      val: { name: "val", case_ids: [] },
+    },
+    cases: [{ id: "c1", input: { user: "hi" }, gold: "hello" }],
+  };
+
+  it("persists reasoning next to scored output and does not score it", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock: typeof fetch = async (input, init) => {
+      calls.push({ url: String(input), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: { content: "hello", reasoning_content: "I should greet" },
+            },
+          ],
+          usage: { completion_tokens_details: { reasoning_tokens: 12 } },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const result = await evaluatePrompt({
+      config: llm,
+      systemPrompt: "greet",
+      versionId: "ver_1",
+      suite,
+      split: "train",
+      fetch: fetchMock,
+    });
+    expect(result.meanQuality).toBe(1);
+    expect(result.cases[0]?.output).toBe("hello");
+    expect(result.cases[0]?.reasoning).toBe("I should greet");
+    expect(result.cases[0]?.finish_reason).toBe("stop");
+    expect(result.cases[0]?.reasoning_tokens).toBe(12);
+    expect(result.cases[0]?.quality).toBe(1);
+    const row = result.scores[0];
+    expect(row?.output).toBe("hello");
+    expect(row?.reasoning).toBe("I should greet");
+    expect(row?.finish_reason).toBe("stop");
+    expect(row?.reasoning_tokens).toBe(12);
+    expect(parseScore(row)).toMatchObject({
+      case_id: "c1",
+      output: "hello",
+      reasoning: "I should greet",
+      finish_reason: "stop",
+      reasoning_tokens: 12,
+    });
+    const body = JSON.parse(String(calls[0]?.init.body));
+    expect(body.messages).toEqual([
+      { role: "system", content: "greet" },
+      { role: "user", content: "hi" },
+    ]);
+    expect(JSON.stringify(body)).not.toContain("I should greet");
+  });
+
+  it("scores empty visible output as a miss while keeping reasoning on the case", async () => {
+    const fetchMock: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: null, reasoning: "planned hello but emitted nothing" } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    const result = await evaluatePrompt({
+      config: llm,
+      systemPrompt: "greet",
+      versionId: "ver_1",
+      suite,
+      split: "train",
+      fetch: fetchMock,
+    });
+    expect(result.cases[0]?.output).toBe("");
+    expect(result.cases[0]?.reasoning).toBe("planned hello but emitted nothing");
+    expect(result.cases[0]?.quality).toBe(0);
+    expect(result.scores[0]?.output).toBe("");
+    expect(result.scores[0]?.reasoning).toBe("planned hello but emitted nothing");
+    expect(result.scores[0]).not.toHaveProperty("finish_reason");
+    expect(result.scores[0]).not.toHaveProperty("reasoning_tokens");
+  });
+
+  it("omits reasoning when the API does not send it", async () => {
+    const fetchMock: typeof fetch = async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: "hello" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    const result = await evaluatePrompt({
+      config: llm,
+      systemPrompt: "greet",
+      versionId: "ver_1",
+      suite,
+      split: "train",
+      fetch: fetchMock,
+    });
+    expect(result.cases[0]?.output).toBe("hello");
+    expect(result.cases[0]).not.toHaveProperty("reasoning");
+    expect(result.scores[0]?.output).toBe("hello");
+    expect(result.scores[0]).not.toHaveProperty("reasoning");
+    expect(parseScore(result.scores[0])).not.toHaveProperty("reasoning");
   });
 });
 

@@ -176,6 +176,19 @@ describe("entity fixtures", () => {
     model_id: "gpt-x",
     metric_id: "exact",
   });
+  const scoreWithTrace = parseScore({
+    quality: 0,
+    latency_ms: 40,
+    split: "train",
+    model_id: "gpt-x",
+    metric_id: "exact",
+    version_id: "ver_1",
+    case_id: "c1",
+    output: "",
+    reasoning: "planned an answer",
+    finish_reason: "length",
+    reasoning_tokens: 8,
+  });
 
   it("parse every named type", () => {
     expect(card.status).toBe("draft");
@@ -185,6 +198,8 @@ describe("entity fixtures", () => {
     expect(run.rung).toBe("R0");
     expect(candidate.version_id).toBe("ver_1");
     expect(score.split).toBe("val");
+    expect(scoreWithTrace.reasoning).toBe("planned an answer");
+    expect(scoreWithTrace.output).toBe("");
   });
 
   it("Ajv accepts fixtures for every emitted schema", () => {
@@ -209,10 +224,16 @@ describe("entity fixtures", () => {
       score,
     };
 
+    let validateScore: ReturnType<Ajv["compile"]> | undefined;
     for (const name of Object.keys(samples) as (keyof typeof namedSchemas)[]) {
       const validate = ajv.compile(jsonSchemaFor(name));
+      if (name === "score") {
+        validateScore = validate;
+      }
       expect(validate(samples[name]), `${name}: ${JSON.stringify(validate.errors)}`).toBe(true);
     }
+    expect(validateScore).toBeDefined();
+    expect(validateScore!(scoreWithTrace), JSON.stringify(validateScore!.errors)).toBe(true);
   });
 
   it("example tools.json and system.md are present", () => {

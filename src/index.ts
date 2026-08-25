@@ -84,6 +84,7 @@ export {
   chatCompletionsUrl,
   imageFileToDataUrl,
   normalizeLlmApiBase,
+  parseChatCompletion,
 } from "@sysprompt-lab/llm";
 export type {
   ChatCompletionResult,
@@ -92,6 +93,7 @@ export type {
   ChatMessageContent,
   FetchFn,
   LlmConfig,
+  ParsedChatCompletion,
 } from "@sysprompt-lab/llm";
 export {
   formatLlmTarget,

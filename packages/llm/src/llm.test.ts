@@ -8,6 +8,7 @@ import {
   imageMimeFromBytes,
   imageMimeFromPath,
   normalizeLlmApiBase,
+  parseChatCompletion,
 } from "@sysprompt-lab/llm";
 import type { LlmConfig } from "@sysprompt-lab/llm";
 import { findRepoRoot } from "@sysprompt-lab/core";
@@ -92,6 +93,9 @@ describe("chatCompletion", () => {
     expect(body.messages).toEqual([{ role: "user", content: "hi" }]);
     expect(body.temperature).toBe(0);
     expect(body.max_tokens).toBeUndefined();
+    expect(result.reasoning).toBeUndefined();
+    expect(result.finish_reason).toBeUndefined();
+    expect(result.reasoning_tokens).toBeUndefined();
   });
 
   it("passes multimodal user content plus temperature and max_tokens", async () => {
@@ -135,5 +139,118 @@ describe("chatCompletion", () => {
       expect(message).not.toContain("sk-super-secret-token");
       expect(message).toContain("[redacted]");
     }
+  });
+
+  it("returns reasoning and usage extras without scoring them into content", async () => {
+    const fetchMock: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: "final answer",
+                reasoning_content: "step by step",
+              },
+            },
+          ],
+          usage: { completion_tokens_details: { reasoning_tokens: 42 } },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+
+    const result = await chatCompletion(config, [{ role: "user", content: "hi" }], { fetch: fetchMock });
+    expect(result.content).toBe("final answer");
+    expect(result.reasoning).toBe("step by step");
+    expect(result.finish_reason).toBe("stop");
+    expect(result.reasoning_tokens).toBe(42);
+  });
+
+  it("treats empty content as success when reasoning is present", async () => {
+    const fetchMock: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "", reasoning_content: "only thoughts" } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+
+    const result = await chatCompletion(config, [{ role: "user", content: "hi" }], { fetch: fetchMock });
+    expect(result.content).toBe("");
+    expect(result.reasoning).toBe("only thoughts");
+  });
+
+  it("does not throw when content is null but reasoning exists", async () => {
+    const fetchMock: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: "length", message: { content: null, reasoning: "still thinking" } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+
+    const result = await chatCompletion(config, [{ role: "user", content: "hi" }], { fetch: fetchMock });
+    expect(result.content).toBe("");
+    expect(result.reasoning).toBe("still thinking");
+    expect(result.finish_reason).toBe("length");
+  });
+});
+
+describe("parseChatCompletion", () => {
+  it("extracts string content", () => {
+    expect(parseChatCompletion({ choices: [{ message: { content: "hello" } }] }).content).toBe("hello");
+  });
+
+  it("joins multimodal text parts and skips thinking parts in content", () => {
+    const parsed = parseChatCompletion({
+      choices: [
+        {
+          message: {
+            content: [
+              { type: "thinking", text: "hidden" },
+              { type: "text", text: "visible " },
+              { type: "text", text: "answer" },
+            ],
+          },
+        },
+      ],
+    });
+    expect(parsed.content).toBe("visible answer");
+    expect(parsed.reasoning).toBe("hidden");
+  });
+
+  it("prefers reasoning_content then reasoning aliases", () => {
+    expect(
+      parseChatCompletion({
+        choices: [{ message: { content: "out", reasoning_content: "from qwen" } }],
+      }).reasoning,
+    ).toBe("from qwen");
+    expect(
+      parseChatCompletion({
+        choices: [{ message: { content: "out", reasoning: "from grok" } }],
+      }).reasoning,
+    ).toBe("from grok");
+    expect(
+      parseChatCompletion({
+        choices: [{ message: { content: "out", thinking: "from alias" } }],
+      }).reasoning,
+    ).toBe("from alias");
+  });
+
+  it("reads reasoning_tokens from completion_tokens_details", () => {
+    const parsed = parseChatCompletion({
+      choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+      usage: { completion_tokens_details: { reasoning_tokens: 9 } },
+    });
+    expect(parsed.finish_reason).toBe("stop");
+    expect(parsed.reasoning_tokens).toBe(9);
+    expect(parsed.reasoning).toBeUndefined();
+  });
+
+  it("throws when there is no content and no reasoning", () => {
+    expect(() => parseChatCompletion({ choices: [{ message: { content: null } }] })).toThrow(
+      /empty message content/,
+    );
+    expect(() => parseChatCompletion({ choices: [{ message: {} }] })).toThrow(/empty message content/);
   });
 });

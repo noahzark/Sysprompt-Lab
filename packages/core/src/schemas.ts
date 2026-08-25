@@ -107,6 +107,12 @@ export const ScoreSchema = z.object({
   metric_id: z.string().min(1),
   version_id: z.string().min(1).optional(),
   case_id: z.string().min(1).optional(),
+  /** Visible student output (scored). Omitted on aggregate rows. */
+  output: z.string().optional(),
+  /** Chain-of-thought from the API. Diagnostic only; never part of the metric. */
+  reasoning: z.string().optional(),
+  finish_reason: z.string().optional(),
+  reasoning_tokens: z.number().optional(),
 });
 
 export type CardStatus = z.infer<typeof CardStatusSchema>;

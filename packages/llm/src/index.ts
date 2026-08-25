@@ -15,6 +15,7 @@ export {
   imageMimeFromBytes,
   imageMimeFromPath,
   normalizeLlmApiBase,
+  parseChatCompletion,
 } from "./llm.js";
 export type {
   ChatCompletionOptions,
@@ -25,4 +26,5 @@ export type {
   ChatMessageContent,
   ChatTextPart,
   FetchFn,
+  ParsedChatCompletion,
 } from "./llm.js";
