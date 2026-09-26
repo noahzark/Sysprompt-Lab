@@ -138,6 +138,41 @@ describe("scoreNsfwSeverityTag", () => {
       "got (unparseable) want 擦边|软色情",
     );
   });
+
+  it("passes a no-tier gold case when the model emits no severity tag", () => {
+    const noTier = { allow_missing: true };
+    expect(scoreNsfwSeverityTag(tagged(["泳装"]), noTier)).toEqual({ quality: 1 });
+    expect(scoreNsfwSeverityTag(tagged([]), noTier)).toEqual({ quality: 1 });
+    expect(scoreNsfwSeverityTag(tagged(["泳装"]), {})).toEqual({ quality: 1 });
+  });
+
+  it("fails a no-tier gold case when the model emits a severity tag", () => {
+    const noTier = { allow_missing: true };
+    expect(scoreNsfwSeverityTag(tagged(["擦边"]), noTier)).toEqual({
+      quality: 0,
+      note: "got 擦边 want (none)",
+    });
+    expect(scoreNsfwSeverityTag(tagged(["擦边", "性感"]), noTier)).toEqual({
+      quality: 0,
+      note: "got 擦边+性感 want (none)",
+    });
+  });
+
+  it("fails a no-tier gold case when the output is unparseable", () => {
+    expect(scoreNsfwSeverityTag("not json", { allow_missing: true })).toEqual({
+      quality: 0,
+      note: "got (unparseable) want (none)",
+    });
+  });
+
+  it("still requires a tag when gold has a severity, even with allow_missing", () => {
+    const goldWithMissing = { severity: "软色情", allow_missing: true };
+    expect(scoreNsfwSeverityTag(tagged(["软色情"]), goldWithMissing).quality).toBe(1);
+    expect(scoreNsfwSeverityTag(tagged(["泳装"]), goldWithMissing)).toEqual({
+      quality: 0,
+      note: "got (none) want 软色情",
+    });
+  });
 });
 
 describe("caseUserText", () => {

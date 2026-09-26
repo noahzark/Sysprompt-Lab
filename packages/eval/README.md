@@ -10,7 +10,7 @@ Same-metric verify. Optimization packages propose a new `system_prompt`; this pa
 
 - Execution: `evaluatePrompt`, `casesForSplit`, `scoreCase`, `caseUserText`, `caseUserContent`
 - Vision cases: `input.image` / `input.image_path` → multimodal user content (`text` + `image_url` data URL). Paths resolve relative to the suite file, `card.source`, or `SYSPROMPT_IMAGE_DIR`.
-- Custom metric `id: nsfw_severity_tag` (kind `custom`): parse JSON `tags[]` and match the single NSFW severity label against gold. Gold may be `"软色情"`, `{ severity: "软色情" }`, or list multiple acceptable tiers (`accept: ["擦边", "软色情"]`, or `severity` as a string array) for borderline images. Miss feedback is `got X want A|B`.
+- Custom metric `id: nsfw_severity_tag` (kind `custom`): parse JSON `tags[]` and match the single NSFW severity label against gold. Gold may be `"软色情"`, `{ severity: "软色情" }`, or list multiple acceptable tiers (`accept: ["擦边", "软色情"]`, or `severity` as a string array) for borderline images. Miss feedback is `got X want A|B`. Gold with no tier (`{}` or `{ allow_missing: true }` and no severity) wants none: a parseable output with zero severity tags scores 1; a severity tag or unparseable output scores 0 (`got … want (none)`). `allow_missing` is not read when a severity is present.
 - Aggregation: `mean`, `aggregateScore`, `formatScoreTable`
 - Gate: `promotionDecision` (R0), `adoptDecision` (R1 mid-loop), `r1PromotionDecision` (R1/R2 end-of-loop)
 
