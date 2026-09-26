@@ -42,6 +42,11 @@ function uniqueTrimmedStrings(value: unknown): string[] {
  * - `{ severity: "软色情", accept: ["擦边", "软色情"] }`
  * - `{ accept: ["擦边", "软色情"] }`
  * - `{ severity: ["擦边", "软色情"] }` (`severity` as the accept set)
+ *
+ * Returns `[]` when gold names no severity tier. That includes
+ * `{ allow_missing: true }` with no `severity` / `accept`, and empty gold
+ * (`{}`). `allow_missing` is not an accept label and is not required for the
+ * empty set. `scoreNsfwSeverityTag` treats `[]` as want `(none)`.
  */
 export function goldAcceptSet(gold: unknown): string[] {
   if (typeof gold === "string") {
@@ -111,8 +116,21 @@ export function severityTagsIn(tags: unknown): string[] {
 }
 
 /**
- * Custom metric `nsfw_severity_tag`: the single predicted NSFW severity tag
- * must be in the gold accept set. Feedback on miss is `got X want A|B`.
+ * Custom metric `nsfw_severity_tag`.
+ *
+ * When gold has a severity or accept set, the single predicted NSFW severity
+ * tag must be in that set. Feedback on miss is `got X want A|B`. A missing
+ * prediction fails (`got (none) want …`). `allow_missing` is not read on this
+ * path, so a severity plus `allow_missing: true` still requires the tag.
+ *
+ * When `goldAcceptSet(gold)` is empty, the case wants no severity tag. Empty
+ * gold (`{}`) and `{ allow_missing: true }` with no tier are the same case:
+ * both pass when the model emits zero severity tags. `allow_missing` is not
+ * required for that pass.
+ * - unparseable output → quality 0, `got (unparseable) want (none)`
+ * - one or more severity tags → quality 0, `got 擦边 want (none)` or
+ *   `got 擦边+性感 want (none)`
+ * - zero severity tags (other content tags are fine) → quality 1
  */
 export function scoreNsfwSeverityTag(
   output: string,
@@ -120,7 +138,7 @@ export function scoreNsfwSeverityTag(
 ): { quality: number; note?: string } {
   const accept = goldAcceptSet(gold);
   if (accept.length === 0) {
-    return { quality: 0, note: "no gold severity" };
+    return scoreNoSeverityTier(output);
   }
   const want = accept.join("|");
   const obj = parseJsonObjectFromModelOutput(output);
@@ -139,4 +157,17 @@ export function scoreNsfwSeverityTag(
     return { quality: 1 };
   }
   return { quality: 0, note: `got ${got} want ${want}` };
+}
+
+/** No gold tier: pass only when the model also emits no severity tag. */
+function scoreNoSeverityTier(output: string): { quality: number; note?: string } {
+  const obj = parseJsonObjectFromModelOutput(output);
+  if (!obj) {
+    return { quality: 0, note: "got (unparseable) want (none)" };
+  }
+  const found = severityTagsIn(obj.tags);
+  if (found.length === 0) {
+    return { quality: 1 };
+  }
+  return { quality: 0, note: `got ${found.join("+")} want (none)` };
 }
