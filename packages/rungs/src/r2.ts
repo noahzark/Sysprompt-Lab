@@ -497,8 +497,8 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
         hasVal,
         originalVal: parsed.baseline_val,
         finalVal: parsed.val_score,
-        originalTrain: parsed.baseline_train ?? 0,
-        finalTrain: parsed.train_score ?? 0,
+        originalTrain: parsed.baseline_train,
+        finalTrain: parsed.train_score,
       });
 
   if (decision.promote && version.system_prompt !== baseline.system_prompt) {

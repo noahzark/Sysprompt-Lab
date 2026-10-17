@@ -224,6 +224,26 @@ cases:
     expect(result.table).not.toMatch(/^val\s/m);
   });
 
+  it("does not promote when the sidecar omits the baseline val score", async () => {
+    setLlmEnv();
+    const root = mkdtempSync(join(tmpdir(), "spl-r2-nobase-"));
+    writeMiniCard(root, "Be vague.", valSuite);
+    const result = await runR2("mini", {
+      root,
+      sidecar: async () => ({
+        best_prompt: "Always reply with good.",
+        train_score: 1,
+        val_score: 1,
+        baseline_train: 0,
+      }),
+    });
+    expect(result.promoted).toBe(false);
+    expect(result.message).toMatch(/missing for the baseline/);
+    const card = parseCard(JSON.parse(readFileSync(join(root, ".spl", "cards", "mini.json"), "utf8")));
+    expect(card.status).toBe("verifying");
+    expect(card.versions.some((v) => v.promoted)).toBe(false);
+  });
+
   it("skips auto-promote when --no-eval is set", async () => {
     setLlmEnv();
     const root = mkdtempSync(join(tmpdir(), "spl-r2-noeval-"));
