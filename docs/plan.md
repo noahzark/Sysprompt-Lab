@@ -8,11 +8,11 @@ Flow: ingest an existing system prompt → optimize → execute on chosen models
 
 | Rung | When | What |
 |---|---|---|
-| **R0** | No dataset | Meta-prompt rewrite, emit a diff, human accepts |
+| **R0** | No dataset / one-shot | Meta-prompt rewrite or structured patch, emit a diff, human accepts |
 | **R1** | Literal system prompt + eval suite | Baseline → failure evidence → few candidates → swap only if score rises |
-| **R2** | Task schema + feedback metric + examples | Wrap `gepa` / `dspy.GEPA` for train / rewrite / verify / select |
+| **R2** | Same Card + suite; needs Python | Wrap official `gepa.optimize` via the sidecar for train / rewrite / verify / select |
 
-All three rungs share one acceptance gate: execute → verify on the same metric (including hold-out) → quality / cost / latency → promote only if better.
+All three rungs share one acceptance gate: execute → verify on the same metric (including the val hold-out) → auto-promote only if val mean quality strictly improves.
 
 Do not reimplement GEPA. Do not fork AGPL code.
 
@@ -27,7 +27,7 @@ TypeScript is an npm workspace. Dependency direction is `cli → rungs → rewri
 | `packages/eval` | Suite run, scoring, train/val, adopt / promote **decisions** |
 | `packages/rewrite` | Full rewrite + section/patch apply + R0/R1 meta-prompts |
 | `packages/rungs` | R0 / R1 / R2 orchestration only (`r0.ts` / `r1.ts` / `r2.ts`) |
-| `packages/cli` | `sysprompt` / `spl` bins, ingest / bind / export / promote / run / suite-viewer |
+| `packages/cli` | `sysprompt` / `spl` bins, ingest / bind / export / promote / run / validate / suite-viewer |
 | `packages/suite-viewer` | Localhost WebUI to inspect / label a suite; optional read-only run overlay (no cloud, no image benches) |
 | `python/` | `python -m sysprompt_gepa` sidecar (stdin/stdout JSON job) |
 | `schemas/` | draft-07 sources of truth |

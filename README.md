@@ -12,11 +12,11 @@
 
 | 档 | 何时 | 做什么 |
 |---|---|---|
-| **R0** | 没有数据集 | 元提示改写，出 diff，人接受 |
+| **R0** | 没有数据集 / 一次性 | 元提示改写或结构化补丁，出 diff，人接受 |
 | **R1** | 有字面系统提示 + 评测集 | 基线 → 失败证据 → 少量候选 → 涨分才换 |
-| **R2** | 有任务图式 + 反馈型指标 + 例子 | 包 `gepa` / `dspy.GEPA`，训改验选 |
+| **R2** | 同一张 Card + 评测集，需要 Python | 包官方 `gepa.optimize`（sidecar），训改验选 |
 
-三档共用同一验收门：执行 → 同指标验证（含 hold-out）→ 质量 / $ / 延迟 → 更好才晋升。
+三档共用同一验收门：执行 → 同指标验证（含 val hold-out）→ val 均分严格上升才自动晋升。
 
 分阶段说明见 [docs/plan.md](docs/plan.md)。给编码代理的稳定约定见 [AGENTS.md](AGENTS.md)。
 
@@ -59,60 +59,138 @@ After `npm run build`, the bins are `sysprompt` and `spl` (`npx sysprompt` / `np
 
 ## Quickstart
 
-Offline ingest / bind / export (no API keys):
+End to end on the bundled example: ingest a prompt → bind an eval suite → optimize on a rung → same-metric eval → promote → export. Every step except 4 runs offline with no API keys.
 
 ```bash
+# 1. Ingest: examples/support-bot/system.md (+ tools.json) → draft Prompt Card
 npm run sysprompt -- ingest examples/support-bot
+
+# 2. Check the suite, then bind it to the card (status: bound)
+npm run sysprompt -- validate examples/support-bot/suite.yaml
 npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
-npm run sysprompt -- export support-bot
-```
 
-Live R0 rewrite + before/after eval on one model. Copy `.env.example` → `.env` first:
+# 3. Optimize + eval on a rung (offline stub; no API keys, no Python)
+npm run sysprompt -- run support-bot --rung R1 --dry-run
 
-```bash
+# 4. Live: copy .env.example → .env, fill LLM_API_BASE / LLM_API_MODEL / LLM_API_TOKEN
 cp .env.example .env
-# fill LLM_API_BASE, LLM_API_MODEL, LLM_API_TOKEN
+npm run sysprompt -- run support-bot --rung R1     # or R0, or R2 (needs the Python sidecar)
 
-npm run sysprompt -- ingest examples/support-bot
-npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
-npm run sysprompt -- run support-bot --rung R0
-npm run sysprompt -- export support-bot
+# 5. Promote: automatic only when val strictly improves; otherwise accept by hand
+npm run sysprompt -- promote support-bot           # latest non-baseline version
+npm run sysprompt -- promote support-bot ver_…     # or a specific version id
+
+# 6. Export the promoted prompt (falls back to the baseline if nothing is promoted)
+npm run sysprompt -- export support-bot            # → .spl/export/support-bot/system.promoted.md
 ```
 
-`run --rung R0` calls the configured OpenAI-compatible API, writes a candidate + unified diff under `.spl/runs/<id>/r0.diff`, scores **train** and **val** (if the suite has val cases) with the same metric, and auto-promotes **only** when val mean quality strictly rises. Otherwise the new version stays `promoted=false`. Train-only suites never auto-promote.
+Each live `run` scores the baseline and the candidate(s) on the **same** suite and metric and prints a train / val table. Workspace state lives under `.spl/` in the current directory (or `--root <dir>`); never commit it:
+
+| Path | What |
+|---|---|
+| `.spl/cards/<card>.json` | Prompt Card (all versions) |
+| `.spl/suites/<suite>.json` | Normalized eval suite (written by `bind`) |
+| `.spl/runs/<run>/` | Per-run artifacts: `run.json`, `candidates.json`, `r0.diff` / `r1.diff` / `r2.diff`, `scores.json` (live eval), plus the rung-specific files below |
+| `.spl/export/<card>/` | `card.json` + `system.promoted.md` |
+
+## Prompt Card format
+
+`ingest <path>` reads a directory (or a `system.md` path inside one):
+
+| File | Required | Content |
+|---|---|---|
+| `system.md` | yes | The literal system prompt, used verbatim as the baseline version |
+| `tools.json` | no | `[{ "id", "name", "description" }]` or `{ "tools": [...] }` |
+
+The card id defaults to the directory name (slugified); override with `--id`. The stored card (`schemas/prompt-card.json`) looks like:
+
+```jsonc
+{
+  "id": "support-bot",
+  "source": "/abs/path/examples/support-bot",
+  "rung": "R0",                       // last rung run: R0 | R1 | R2
+  "status": "draft",                  // draft → bound → optimizing → verifying → promoted → exported (or rejected)
+  "suite_id": "support-bot",          // set by `bind`
+  "versions": [
+    { "id": "ver_…", "system_prompt": "…", "is_baseline": true, "promoted": false },
+    { "id": "ver_…", "system_prompt": "…", "hypothesis": "…", "is_baseline": false, "promoted": true, "parent": "ver_…" }
+  ],
+  "tools": [{ "id": "lookup_order", "name": "lookup_order", "description": "…" }],
+  "models": []
+}
+```
+
+Every rung appends versions; nothing overwrites the baseline. `promote` flips `promoted` on one version, and `export` writes that version (or the baseline).
+
+## Eval suite format
+
+YAML or JSON (`schemas/eval-suite.json`). See [`examples/support-bot/suite.yaml`](examples/support-bot/suite.yaml):
+
+```yaml
+id: support-bot
+name: Support bot offline suite
+metric:
+  id: string_contains
+  kind: custom            # exact | custom (llm_judge is not implemented yet)
+  returns_feedback: false
+splits:                   # case ids; a case may sit in only one split
+  train: [greet-hello, refund-ask, hours-ask, unknown-order]
+  val: [greet-hi, escalate-angry]   # may be empty; train-only suites never auto-promote on R0
+cases:
+  - id: refund-ask
+    input:
+      user: I want a refund for my last purchase.
+      # image: / image_path: local jpeg/png/webp for vision cases
+    gold: 30-day
+    feedback: optional note shown to the rewriter
+temperature: 0            # optional, student eval only
+max_tokens: 512           # optional, student eval only
+```
+
+Scoring per `metric`:
+
+| `kind` / `id` | Pass when |
+|---|---|
+| `exact` | trimmed output equals `gold` |
+| `custom` (any id) | output contains `gold` (case-insensitive) |
+| `custom` + `id: nsfw_severity_tag` | one JSON `tags[]` severity label matches gold (see [Vision cases](#vision-cases)) |
+
+Splits may also be written as `{ name: train, case_ids: [...] }`.
+
+## Commands
+
+All commands accept the global `--root <dir>` (workspace that holds `.spl/`, default: cwd). `<card>` is a card id or a path to a card JSON.
+
+| Command | What |
+|---|---|
+| `ingest <path> [--id <id>]` | `system.md` (+ `tools.json`) → draft card |
+| `validate <path>` | Check a card JSON or suite YAML/JSON against the schemas |
+| `bind <card> <suite.yaml>` | Attach a suite; status `bound` |
+| `run <card> --rung R0\|R1\|R2 [flags]` | Optimize + eval; see the rungs and flags below |
+| `promote <card> [version]` | Human accept; does not re-run the gate |
+| `export <card> [-o <dir>]` | `card.json` + `system.promoted.md` (default `.spl/export/<card>`) |
+| `suite-viewer <suite.yaml> [flags]` | Localhost WebUI; see [Suite Viewer](#suite-viewer-local-webui) |
+
+`ingest` / `bind` / `export` / `validate` / `promote` / `run --dry-run` / `suite-viewer` need no LLM env.
+
+## Rungs
+
+**R0** (`run --rung R0`) calls the configured OpenAI-compatible API, writes a candidate + unified diff under `.spl/runs/<id>/r0.diff`, scores **train** and **val** (if the suite has val cases) with the same metric, and auto-promotes **only** when val mean quality strictly rises. Otherwise the new version stays `promoted=false`. Train-only suites never auto-promote.
 
 On large system prompts (`auto` when length ≥ 1500 characters, or `--rewrite-mode patch`) R0 asks for a **structured patch** (JSON edits or a unified diff) and applies it to the current prompt. Tiny prompts still get a full rewrite. Artifacts include `sections.json` (section map) and `patch.json`.
 
-Live R1 eval-loop (same `.env`). The card must already be bound to a suite:
+**R1** (`run --rung R1`, same `.env`; the card must be bound) scores the baseline, shows the rewriter train failures + scores + history, and proposes a few candidates. On large prompts (`auto` ≥ 1500 chars, or `--rewrite-mode patch`) those candidates are **patches** — JSON `edits` or a unified diff — not a full rewrite; the rewriter is told to patch only what the failures implicate. Tiny prompts still use a full rewrite. Each candidate is eval'd on the same suite and adopted only if the score rises (val first, train as a val-tie break; train-only if the suite has no val cases). After the loop it writes `.spl/runs/<id>/candidates.jsonl`, `scores.json`, `sections.json`, and `r1.diff` (baseline → best). Auto-promote happens only if the **final** val (or train if there is no val) strictly beats the original baseline; otherwise the run stays unpromoted and the CLI says so.
 
-```bash
-npm run sysprompt -- ingest examples/support-bot
-npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
-npm run sysprompt -- run support-bot --rung R1
-```
-
-R1 scores the baseline, shows the rewriter train failures + scores + history, and proposes a few candidates. On large prompts (`auto` ≥ 1500 chars, or `--rewrite-mode patch`) those candidates are **patches** — JSON `edits` or a unified diff — not a full rewrite; the rewriter is told to patch only what the failures implicate. Tiny prompts still use a full rewrite. Each candidate is eval'd on the same suite and adopted only if the score rises (val first, train as a val-tie break; train-only if the suite has no val cases). After the loop it writes `.spl/runs/<id>/candidates.jsonl`, `scores.json`, `sections.json`, and `r1.diff` (baseline → best). Auto-promote happens only if the **final** val (or train if there is no val) strictly beats the original baseline; otherwise the run stays unpromoted and the CLI says so.
-
-Live R2 wraps official GEPA (same `.env`, plus optional `LLM_REFLECTION_MODEL`). Install the Python sidecar first (Python 3.10+; this downloads `gepa`):
+**R2** wraps official GEPA (same `.env`, plus optional `LLM_REFLECTION_MODEL`). Install the Python sidecar first (Python 3.10+; this downloads `gepa`):
 
 ```bash
 pip install -r python/requirements.txt   # or: pip install -e python/
-npm run sysprompt -- ingest examples/support-bot
-npm run sysprompt -- bind support-bot examples/support-bot/suite.yaml
-npm run sysprompt -- run support-bot --rung R2
+npm run sysprompt -- run support-bot --rung R2 --budget light
 ```
 
 `--rung R2` writes a job (seed prompt + suite cases + metric + API env), runs `python -m sysprompt_gepa` which calls `gepa.optimize`, then writes the best instruction back onto the Card. Artifacts: `.spl/runs/<id>/r2.diff`, `sidecar.json`, `scores.json`, `candidates.jsonl`, `summary.md`. Train mutates, val selects. Auto-promote uses the same gate as R1 (val must strictly beat the original baseline; train-only suites may promote if train rises). `--dry-run` skips Python and writes a stub candidate (what CI uses). `--budget light|medium|heavy` (default `light` = 24 metric calls; `medium` 60; `heavy` 150) or a positive integer. Do not call R0/R1 “GEPA”. R2 still optimizes the whole instruction via the GEPA sidecar; large-prompt patch mode is R0/R1 only.
 
-Human accept without auto-promote:
-
-```bash
-npm run sysprompt -- promote support-bot            # latest non-baseline version
-npm run sysprompt -- promote support-bot ver_…      # a specific version
-npm run sysprompt -- export support-bot
-```
-
-Flags:
+### `run` flags
 
 | Flag | Effect |
 |---|---|
@@ -130,6 +208,8 @@ Flags:
 
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 
+### Vision cases
+
 Vision cases are supported in the framework (`input.image` / `input.image_path`, student `--temperature` / `--max-tokens`, custom metric `nsfw_severity_tag`) but **do not commit** image binaries or a real tagging bench. Keep the suite and files on your machine; point images at a local directory or `SYSPROMPT_IMAGE_DIR`. Gold for `nsfw_severity_tag` may list multiple acceptable severities (`accept` or a `severity` array) for borderline images. Gold with no tier passes when the model also emits no severity tag.
 
 ### Suite Viewer (local WebUI)
@@ -143,6 +223,8 @@ npm run suite-viewer -- examples/support-bot/suite.yaml --run /path/to/report.js
 # same via the CLI:
 npm run sysprompt -- suite-viewer /path/to/private/suite.yaml --run scores.json --runs-dir .spl/runs
 ```
+
+Flags: `--port <n>` (default `8787`), `--host <host>` (default `127.0.0.1`), `--image-dir <dir>` (or `SYSPROMPT_IMAGE_DIR`), `--run <file>` (read-only overlay), `--runs-dir <dir>` (folder of run files the UI can switch between).
 
 Point this at a **private** suite path. Save is atomic (temp + rename) and refuses to write an invalid NSFW severity. If the file changed on disk, the UI asks before overwrite. Saving gold does not mutate the run file. See [`packages/suite-viewer/README.md`](packages/suite-viewer/README.md).
 
@@ -160,7 +242,7 @@ Point this at a **private** suite path. Save is atomic (temp + rename) and refus
 cp .env.example .env
 ```
 
-`ingest` / `bind` / `export` / `run --dry-run` 不需要这些变量。真正调模型的 `run --rung R0` / `R1` / `R2` 会调用 `getLlmConfig()`；缺任一变量会报错并提示复制 `.env.example`。
+`ingest` / `bind` / `export` / `validate` / `promote` / `run --dry-run` / `suite-viewer` 不需要这些变量。真正调模型的 `run --rung R0` / `R1` / `R2` 会调用 `getLlmConfig()`；缺任一变量会报错并提示复制 `.env.example`。
 
 R1 循环次数也可用环境变量覆盖（命令行 flag 优先）：`SYSPROMPT_R1_ROUNDS`、`SYSPROMPT_R1_CANDIDATES`、`SYSPROMPT_R1_PASS_STREAK`、`SYSPROMPT_R1_BUDGET`。
 
@@ -178,7 +260,7 @@ JSON Schema (draft-07) for every entity lives in [`schemas/`](schemas/). Zod sou
 
 ## Status
 
-Phase 3: schemas + offline ingest / bind / export + R0 rewrite, R1 eval-loop, and R2 GEPA wrap (`python -m sysprompt_gepa`). Live R2 needs `pip install -r python/requirements.txt`.
+Phase 3: schemas + offline ingest / bind / validate / export + R0 rewrite, R1 eval-loop (both with large-prompt patch mode), R2 GEPA wrap (`python -m sysprompt_gepa`), multimodal eval cases, and the local Suite Viewer. Live R2 needs `pip install -r python/requirements.txt`.
 
 ## License
 
