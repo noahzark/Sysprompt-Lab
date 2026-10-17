@@ -1,24 +1,26 @@
 # Sysprompt Lab
 
-跨模型的系统提示工作台：读入已有系统提示 → 分档优化（R0 改写 / R1 评测环 / R2 包 GEPA）→ 在指定模型上执行 → 用同一套评测验收，更好才晋升。
+English | [简体中文](README.zh-CN.md)
 
-## 定位
+A cross-model system-prompt workbench: ingest an existing system prompt → optimize it on a rung (R0 rewrite / R1 eval loop / R2 GEPA wrap) → run it on the model you choose → verify with the same eval suite, and promote only when it is better.
 
-不是再做一个「粘贴 → 更漂亮的提示」工具，也不是让你先改写成 DSPy 模块。占的是大厂控制台锁模型和编译器框架逼你换对象模型之间的空位。
+## Positioning
 
-核心单元是 **Prompt Card**，不是聊天。
+This is not another "paste → prettier prompt" tool, and it does not make you rewrite your prompt as DSPy modules first. It fills the gap between vendor consoles that lock you to one model and compiler frameworks that force a new object model on you.
 
-## 三档
+The unit of work is a **Prompt Card**, not a chat.
 
-| 档 | 何时 | 做什么 |
+## Rungs at a glance
+
+| Rung | When | What |
 |---|---|---|
-| **R0** | 没有数据集 / 一次性 | 元提示改写或结构化补丁，出 diff，人接受 |
-| **R1** | 有字面系统提示 + 评测集 | 基线 → 失败证据 → 少量候选 → 涨分才换 |
-| **R2** | 同一张 Card + 评测集，需要 Python | 包官方 `gepa.optimize`（sidecar），训改验选 |
+| **R0** | No dataset / one-shot | Meta-prompt rewrite or structured patch, unified diff, human accepts |
+| **R1** | Literal system prompt + eval suite | Baseline → failure evidence → a few candidates → adopt only if the score rises |
+| **R2** | Same Card + suite; needs Python | Wrap official `gepa.optimize` (sidecar): train mutates, val selects |
 
-三档共用同一验收门：执行 → 同指标验证（含 val hold-out）→ val 均分严格上升才自动晋升。
+All three rungs share one acceptance gate: execute → verify on the same metric (including the val hold-out) → auto-promote only when val mean quality strictly rises.
 
-分阶段说明见 [docs/plan.md](docs/plan.md)。给编码代理的稳定约定见 [AGENTS.md](AGENTS.md)。
+See [docs/plan.md](docs/plan.md) for the phased plan and [AGENTS.md](AGENTS.md) for durable conventions for coding agents.
 
 ## Layout
 
@@ -228,27 +230,33 @@ Flags: `--port <n>` (default `8787`), `--host <host>` (default `127.0.0.1`), `--
 
 Point this at a **private** suite path. Save is atomic (temp + rename) and refuses to write an invalid NSFW severity. If the file changed on disk, the UI asks before overwrite. Saving gold does not mutate the run file. See [`packages/suite-viewer/README.md`](packages/suite-viewer/README.md).
 
-## 在哪里配置 / Where to configure
+## Where to configure
 
-把仓库根目录（或运行 CLI 时的当前工作目录）里的 `.env.example` 复制为 `.env`，填写这三个变量：
+Copy `.env.example` in the repo root (or in the directory you run the CLI from) to `.env` and fill in three variables:
 
-| 变量 | 含义 |
+| Variable | Meaning |
 |---|---|
-| `LLM_API_BASE` | OpenAI 兼容 API 根地址。若没有 `/v1` 后缀会自动补上，再 POST `{base}/chat/completions` |
-| `LLM_API_MODEL` | 模型 / API id（如 `gpt-4o-mini`、`deepseek-chat`） |
-| `LLM_API_TOKEN` | 密钥；只写在 `.env`，不要提交。日志里只打码，不会打印原文 |
+| `LLM_API_BASE` | OpenAI-compatible API root. `/v1` is appended when missing, then the client POSTs `{base}/chat/completions` |
+| `LLM_API_MODEL` | Model / API id (for example `gpt-4o-mini`, `deepseek-chat`) |
+| `LLM_API_TOKEN` | Secret. Keep it in `.env` only and never commit it. Logs mask it and never print the raw value |
 
 ```bash
 cp .env.example .env
 ```
 
-`ingest` / `bind` / `export` / `validate` / `promote` / `run --dry-run` / `suite-viewer` 不需要这些变量。真正调模型的 `run --rung R0` / `R1` / `R2` 会调用 `getLlmConfig()`；缺任一变量会报错并提示复制 `.env.example`。
+`ingest` / `bind` / `export` / `validate` / `promote` / `run --dry-run` / `suite-viewer` need none of these. Live `run --rung R0` / `R1` / `R2` calls `getLlmConfig()`, which fails with a hint to copy `.env.example` when any variable is missing.
 
-R1 循环次数也可用环境变量覆盖（命令行 flag 优先）：`SYSPROMPT_R1_ROUNDS`、`SYSPROMPT_R1_CANDIDATES`、`SYSPROMPT_R1_PASS_STREAK`、`SYSPROMPT_R1_BUDGET`。
+Optional overrides (CLI flags win):
 
-R0/R1 改写模式：`SYSPROMPT_REWRITE_MODE`（`patch` / `full` / `auto`）、`SYSPROMPT_PATCH_THRESHOLD`（默认 1500 字符）。大提示默认打补丁，避免整段重写被截断。
-
-R2 还可用 `LLM_REFLECTION_MODEL`（缺省与 `LLM_API_MODEL` 相同）、`SYSPROMPT_R2_BUDGET`、`SYSPROMPT_PYTHON`。日志只打码 token，不会打印原文。
+| Variable | Meaning |
+|---|---|
+| `SYSPROMPT_R1_ROUNDS` / `SYSPROMPT_R1_CANDIDATES` / `SYSPROMPT_R1_PASS_STREAK` / `SYSPROMPT_R1_BUDGET` | R1 loop knobs |
+| `SYSPROMPT_REWRITE_MODE` | R0/R1 rewrite mode: `patch` / `full` / `auto`. Large prompts are patched by default so a whole rewrite does not get truncated |
+| `SYSPROMPT_PATCH_THRESHOLD` | `auto` switches to patch mode at this many characters (default `1500`) |
+| `LLM_REFLECTION_MODEL` | R2 reflection model; defaults to `LLM_API_MODEL` |
+| `SYSPROMPT_R2_BUDGET` | R2 budget: `light` / `medium` / `heavy` or max metric calls |
+| `SYSPROMPT_PYTHON` | Python 3.10+ executable for the R2 sidecar |
+| `SYSPROMPT_IMAGE_DIR` | Directory of local images for vision cases |
 
 ## Library
 
