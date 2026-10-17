@@ -190,14 +190,14 @@ pip install -r python/requirements.txt   # or: pip install -e python/
 npm run sysprompt -- run support-bot --rung R2 --budget light
 ```
 
-`--rung R2` writes a job (seed prompt + suite cases + metric + API env), runs `python -m sysprompt_gepa` which calls `gepa.optimize`, then writes the best instruction back onto the Card. Artifacts: `.spl/runs/<id>/r2.diff`, `sidecar.json`, `scores.json`, `candidates.jsonl`, `summary.md`. Train mutates, val selects. Auto-promote uses the same gate as R1 (val must strictly beat the original baseline; train-only suites may promote if train rises). `--dry-run` skips Python and writes a stub candidate (what CI uses). `--budget light|medium|heavy` (default `light` = 24 metric calls; `medium` 60; `heavy` 150) or a positive integer. Do not call R0/R1 “GEPA”. R2 still optimizes the whole instruction via the GEPA sidecar; large-prompt patch mode is R0/R1 only.
+`--rung R2` writes a job (seed prompt + suite cases + metric + API env), runs `python -m sysprompt_gepa` which calls `gepa.optimize`, then writes the best instruction back onto the Card. Artifacts: `.spl/runs/<id>/r2.diff`, `sidecar.json`, `scores.json`, `candidates.jsonl`, `summary.md`. Train mutates, val selects. Before the gate, the baseline and GEPA's best prompt are re-scored in TypeScript with the suite metric (the same scorer R0/R1 use), and only those scores decide promotion; the sidecar's own scores are kept in `sidecar.json` and `summary.md` as diagnostics. Auto-promote uses the same gate as R1 (val must strictly beat the original baseline; train-only suites may promote if train rises). `--dry-run` skips Python and writes a stub candidate (what CI uses). `--budget light|medium|heavy` (default `light` = 24 metric calls; `medium` 60; `heavy` 150) or a positive integer. Do not call R0/R1 “GEPA”. R2 still optimizes the whole instruction via the GEPA sidecar; large-prompt patch mode is R0/R1 only.
 
 ### `run` flags
 
 | Flag | Effect |
 |---|---|
 | `--dry-run` | No LLM / Python GEPA calls. R0/R1 apply a tiny fake patch; R2 writes a stub candidate (used by tests) |
-| `--no-eval` | R0/R1: rewrite only. R2: skip auto-promote after the wrap |
+| `--no-eval` | R0/R1: rewrite only. R2: skip the verify pass and auto-promote after the wrap |
 | `--rounds <n>` | R1 max search rounds (default `3`, or `SYSPROMPT_R1_ROUNDS`) |
 | `--candidates <n>` | R1 candidates per round (default `3`, or `SYSPROMPT_R1_CANDIDATES`) |
 | `--pass-streak <n>` | R1 stop after N consecutive adopts (default `1`, or `SYSPROMPT_R1_PASS_STREAK`) |
@@ -205,8 +205,8 @@ npm run sysprompt -- run support-bot --rung R2 --budget light
 | `--rewrite-mode <mode>` | R0/R1: `patch` \| `full` \| `auto` (default `auto`). `auto` uses `patch` when the prompt is ≥ 1500 chars (`SYSPROMPT_PATCH_THRESHOLD`), else `full` |
 | `--max-patch-ratio <n>` | R0/R1: reject a patch that changes more than this fraction of characters (default `0.8` on R0, `0.5` on R1) |
 | `--allow-full-rewrite` / `--no-allow-full-rewrite` | If a patch cannot be applied, retry once, then optionally fall back to a full rewrite. Default: on for R0; off for R1 on large/`patch` prompts |
-| `--temperature <n>` | R0/R1 **student** eval temperature (default `0`, or `suite.temperature`). Rewriter stays colder |
-| `--max-tokens <n>` | R0/R1 **student** eval `max_tokens` (omit by default, or `suite.max_tokens`) |
+| `--temperature <n>` | R0/R1 and R2 verify **student** eval temperature (default `0`, or `suite.temperature`). Rewriter stays colder |
+| `--max-tokens <n>` | R0/R1 and R2 verify **student** eval `max_tokens` (omit by default, or `suite.max_tokens`) |
 
 More detail: [examples/support-bot/README.md](examples/support-bot/README.md).
 

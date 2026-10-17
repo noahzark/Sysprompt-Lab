@@ -38,6 +38,23 @@ function setLlmEnv(): void {
   process.env.LLM_API_TOKEN = "sk-super-secret-token";
 }
 
+function completion(content: string): Response {
+  return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** Student stub for the TS verify pass: says "good" only when the system prompt does. */
+function studentFetch(calls: string[] = []): typeof fetch {
+  return async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
+    const system = body.messages.find((m) => m.role === "system")?.content ?? "";
+    calls.push(system);
+    return completion(/good/i.test(system) ? "good" : "bad");
+  };
+}
+
 function writeMiniCard(root: string, system: string, suiteYaml: string, id = "mini"): string {
   const dir = join(root, "prompt");
   mkdirSync(dir, { recursive: true });
@@ -123,9 +140,11 @@ describe("runR2 dry-run and mocked sidecar", () => {
     setLlmEnv();
     const root = mkdtempSync(join(tmpdir(), "spl-r2-promote-"));
     writeMiniCard(root, "Be vague.", valSuite);
+    const calls: string[] = [];
     const result = await runR2("mini", {
       root,
       budget: "medium",
+      fetch: studentFetch(calls),
       sidecar: async (job) => {
         expect(job.seed_prompt).toContain("Be vague.");
         expect(job.train).toHaveLength(1);
@@ -163,6 +182,36 @@ describe("runR2 dry-run and mocked sidecar", () => {
     expect(card.rung).toBe("R2");
     expect(card.versions.some((v) => !v.is_baseline && v.promoted)).toBe(true);
     expect(card.versions.find((v) => v.promoted)?.system_prompt).toBe("Always reply with good.");
+    // Baseline + best, each on train and val.
+    expect(calls).toHaveLength(4);
+  });
+
+  it("gates on the TypeScript verify pass, not the sidecar's own scores", async () => {
+    setLlmEnv();
+    const root = mkdtempSync(join(tmpdir(), "spl-r2-verify-"));
+    writeMiniCard(root, "Be vague.", valSuite);
+    const result = await runR2("mini", {
+      root,
+      fetch: studentFetch(),
+      // Sidecar claims a val rise, but the suite metric says the new prompt still fails.
+      sidecar: async () => ({
+        best_prompt: "Be vague, but kinder.",
+        train_score: 1,
+        val_score: 1,
+        baseline_train: 0,
+        baseline_val: 0,
+      }),
+    });
+    expect(result.promoted).toBe(false);
+    expect(result.message).toMatch(/did not strictly rise/);
+    expect(result.table).toMatch(/val\s+0\.000\s+0\.000/);
+    const summary = readFileSync(result.summaryPath!, "utf8");
+    expect(summary).toMatch(/GEPA-reported scores \(diagnostic/);
+    expect(summary).toMatch(/val: 0\.000 → 1\.000/);
+    const lineage = readFileSync(result.candidatesJsonlPath!, "utf8").split("\n")[0]!;
+    expect(JSON.parse(lineage)).toMatchObject({ val_quality: 0, gepa_val: 1 });
+    const card = parseCard(JSON.parse(readFileSync(join(root, ".spl", "cards", "mini.json"), "utf8")));
+    expect(card.status).toBe("verifying");
   });
 
   it("does not promote when mocked sidecar val does not rise", async () => {
@@ -171,6 +220,7 @@ describe("runR2 dry-run and mocked sidecar", () => {
     writeMiniCard(root, "Already good.", valSuite);
     const result = await runR2("mini", {
       root,
+      fetch: studentFetch(),
       sidecar: async () => ({
         best_prompt: "Still good, slightly longer.",
         hypothesis: "No gain",
@@ -211,6 +261,7 @@ cases:
     );
     const result = await runR2("mini", {
       root,
+      fetch: studentFetch(),
       sidecar: async () => ({
         best_prompt: "Always reply with good.",
         train_score: 1,
@@ -224,23 +275,32 @@ cases:
     expect(result.table).not.toMatch(/^val\s/m);
   });
 
-  it("does not promote when the sidecar omits the baseline val score", async () => {
+  it("does not depend on sidecar scores being present", async () => {
     setLlmEnv();
     const root = mkdtempSync(join(tmpdir(), "spl-r2-nobase-"));
     writeMiniCard(root, "Be vague.", valSuite);
     const result = await runR2("mini", {
       root,
-      sidecar: async () => ({
-        best_prompt: "Always reply with good.",
-        train_score: 1,
-        val_score: 1,
-        baseline_train: 0,
-      }),
+      fetch: studentFetch(),
+      sidecar: async () => ({ best_prompt: "Always reply with good." }),
     });
-    expect(result.promoted).toBe(false);
-    expect(result.message).toMatch(/missing for the baseline/);
+    expect(result.promoted).toBe(true);
+    expect(result.message).toMatch(/val mean quality rose \(0\.000 → 1\.000\)/);
+  });
+
+  it("does not promote when the verify pass cannot score val", async () => {
+    setLlmEnv();
+    const root = mkdtempSync(join(tmpdir(), "spl-r2-fail-"));
+    writeMiniCard(root, "Be vague.", valSuite);
+    const failing: typeof fetch = async () => new Response("upstream down", { status: 500 });
+    await expect(
+      runR2("mini", {
+        root,
+        fetch: failing,
+        sidecar: async () => ({ best_prompt: "Always reply with good." }),
+      }),
+    ).rejects.toThrow();
     const card = parseCard(JSON.parse(readFileSync(join(root, ".spl", "cards", "mini.json"), "utf8")));
-    expect(card.status).toBe("verifying");
     expect(card.versions.some((v) => v.promoted)).toBe(false);
   });
 
@@ -251,6 +311,9 @@ cases:
     const result = await runR2("mini", {
       root,
       noEval: true,
+      fetch: async () => {
+        throw new Error("--no-eval must not call the student");
+      },
       sidecar: async () => ({
         best_prompt: "New prompt.",
         train_score: 1,

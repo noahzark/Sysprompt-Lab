@@ -115,6 +115,7 @@ Cases may set `input.image` or `input.image_path`. The student request is system
 Auto-promote only if **val** mean quality **strictly** improves versus the original baseline.
 
 - R0: train-only suites never auto-promote.
+- R2: gate on scores from the TypeScript eval (`evaluatePrompt`) of baseline vs `best_prompt`, never on the sidecar's own scores.
 - R1 / R2: if the suite has val cases, val must strictly rise. Mid-loop R1 adopt may use train as a **val-tie** break; end-of-loop promote still requires a strict rise vs the original baseline. Train-only suites may promote when train strictly rises.
 - Human accept: `sysprompt promote <card> [version]` — does not re-run the gate.
 

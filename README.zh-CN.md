@@ -190,14 +190,14 @@ pip install -r python/requirements.txt   # 或：pip install -e python/
 npm run sysprompt -- run support-bot --rung R2 --budget light
 ```
 
-`--rung R2` 写出一个任务（种子提示 + 评测用例 + 指标 + API 环境），运行调用 `gepa.optimize` 的 `python -m sysprompt_gepa`，再把最优指令写回 Card。产物：`.spl/runs/<id>/r2.diff`、`sidecar.json`、`scores.json`、`candidates.jsonl`、`summary.md`。train 变异，val 选择。自动晋升与 R1 用同一验收门（val 必须严格超过最初基线；只有 train 的评测集在 train 上升时可晋升）。`--dry-run` 跳过 Python，写出桩候选（CI 使用）。`--budget light|medium|heavy`（默认 `light` = 24 次指标调用；`medium` 60；`heavy` 150）或正整数。不要把 R0/R1 称为「GEPA」。R2 通过 GEPA sidecar 优化整段指令；大提示补丁模式只用于 R0/R1。
+`--rung R2` 写出一个任务（种子提示 + 评测用例 + 指标 + API 环境），运行调用 `gepa.optimize` 的 `python -m sysprompt_gepa`，再把最优指令写回 Card。产物：`.spl/runs/<id>/r2.diff`、`sidecar.json`、`scores.json`、`candidates.jsonl`、`summary.md`。train 变异，val 选择。进入验收门之前，基线和 GEPA 的最优提示会在 TypeScript 中用评测集指标重新打分（与 R0/R1 同一个评分器），只有这些分数决定是否晋升；sidecar 自己的分数作为诊断信息保留在 `sidecar.json` 和 `summary.md` 中。自动晋升与 R1 用同一验收门（val 必须严格超过最初基线；只有 train 的评测集在 train 上升时可晋升）。`--dry-run` 跳过 Python，写出桩候选（CI 使用）。`--budget light|medium|heavy`（默认 `light` = 24 次指标调用；`medium` 60；`heavy` 150）或正整数。不要把 R0/R1 称为「GEPA」。R2 通过 GEPA sidecar 优化整段指令；大提示补丁模式只用于 R0/R1。
 
 ### `run` 参数
 
 | 参数 | 作用 |
 |---|---|
 | `--dry-run` | 不调用 LLM / Python GEPA。R0/R1 应用一个很小的假补丁；R2 写出桩候选（测试使用） |
-| `--no-eval` | R0/R1：只改写。R2：包装后跳过自动晋升 |
+| `--no-eval` | R0/R1：只改写。R2：包装后跳过复核和自动晋升 |
 | `--rounds <n>` | R1 最大搜索轮数（默认 `3`，或 `SYSPROMPT_R1_ROUNDS`） |
 | `--candidates <n>` | R1 每轮候选数（默认 `3`，或 `SYSPROMPT_R1_CANDIDATES`） |
 | `--pass-streak <n>` | R1 连续采纳 N 次后停止（默认 `1`，或 `SYSPROMPT_R1_PASS_STREAK`） |
@@ -205,8 +205,8 @@ npm run sysprompt -- run support-bot --rung R2 --budget light
 | `--rewrite-mode <mode>` | R0/R1：`patch` \| `full` \| `auto`（默认 `auto`）。`auto` 在提示 ≥ 1500 字符（`SYSPROMPT_PATCH_THRESHOLD`）时用 `patch`，否则用 `full` |
 | `--max-patch-ratio <n>` | R0/R1：拒绝改动字符比例超过该值的补丁（R0 默认 `0.8`，R1 默认 `0.5`） |
 | `--allow-full-rewrite` / `--no-allow-full-rewrite` | 补丁无法应用时重试一次，之后可选择回退到整段改写。默认：R0 开启；R1 在大提示 / `patch` 模式下关闭 |
-| `--temperature <n>` | R0/R1 **学生模型**评测温度（默认 `0`，或 `suite.temperature`）。改写器温度更低 |
-| `--max-tokens <n>` | R0/R1 **学生模型**评测 `max_tokens`（默认不传，或 `suite.max_tokens`） |
+| `--temperature <n>` | R0/R1 及 R2 复核的**学生模型**评测温度（默认 `0`，或 `suite.temperature`）。改写器温度更低 |
+| `--max-tokens <n>` | R0/R1 及 R2 复核的**学生模型**评测 `max_tokens`（默认不传，或 `suite.max_tokens`） |
 
 更多细节：[examples/support-bot/README.md](examples/support-bot/README.md)。
 
