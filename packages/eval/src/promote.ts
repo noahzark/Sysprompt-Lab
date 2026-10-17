@@ -1,11 +1,30 @@
 export interface PromotionDecision {
   promote: boolean;
-  reason: "val_improved" | "val_not_improved" | "train_only";
+  reason: "val_improved" | "val_not_improved" | "train_improved" | "train_only" | "missing_score";
   message: string;
 }
 
 function fmt(n: number): string {
   return n.toFixed(3);
+}
+
+function isScore(n: number | undefined): n is number {
+  return typeof n === "number" && Number.isFinite(n);
+}
+
+/** Fail closed: a split we never scored is not a 0.000 baseline. */
+function missingScore(split: "val" | "train", baseline?: number, candidate?: number): PromotionDecision {
+  const side =
+    !isScore(baseline) && !isScore(candidate)
+      ? "baseline and candidate"
+      : !isScore(baseline)
+        ? "baseline"
+        : "candidate";
+  return {
+    promote: false,
+    reason: "missing_score",
+    message: `${split} mean quality is missing for the ${side}; refusing auto-promote (promoted=false).`,
+  };
 }
 
 /**
@@ -25,8 +44,11 @@ export function promotionDecision(input: {
         "No val split — refusing auto-promote (train-only). Export a chosen version, or run: sysprompt promote <card> [version]",
     };
   }
-  const baseline = input.valBaseline ?? 0;
-  const candidate = input.valCandidate ?? 0;
+  const baseline = input.valBaseline;
+  const candidate = input.valCandidate;
+  if (!isScore(baseline) || !isScore(candidate)) {
+    return missingScore("val", baseline, candidate);
+  }
   if (candidate > baseline) {
     return {
       promote: true,
@@ -77,18 +99,22 @@ export function adoptDecision(input: {
 /**
  * R1 end-of-loop promote: final val (or train if the suite has no val cases)
  * must strictly beat the original baseline. Unlike R0, train-only suites may
- * auto-promote when train rises.
+ * auto-promote when train rises. A missing score on the compared split never
+ * promotes.
  */
 export function r1PromotionDecision(input: {
   hasVal: boolean;
   originalVal?: number;
   finalVal?: number;
-  originalTrain: number;
-  finalTrain: number;
+  originalTrain?: number;
+  finalTrain?: number;
 }): PromotionDecision {
   if (input.hasVal) {
-    const baseline = input.originalVal ?? 0;
-    const candidate = input.finalVal ?? 0;
+    const baseline = input.originalVal;
+    const candidate = input.finalVal;
+    if (!isScore(baseline) || !isScore(candidate)) {
+      return missingScore("val", baseline, candidate);
+    }
     if (candidate > baseline) {
       return {
         promote: true,
@@ -102,16 +128,21 @@ export function r1PromotionDecision(input: {
       message: `val mean quality did not strictly rise vs original baseline (${fmt(baseline)} → ${fmt(candidate)}); left unpromoted (promoted=false).`,
     };
   }
-  if (input.finalTrain > input.originalTrain) {
+  const originalTrain = input.originalTrain;
+  const finalTrain = input.finalTrain;
+  if (!isScore(originalTrain) || !isScore(finalTrain)) {
+    return missingScore("train", originalTrain, finalTrain);
+  }
+  if (finalTrain > originalTrain) {
     return {
       promote: true,
-      reason: "val_improved",
-      message: `No val split — train mean quality rose (${fmt(input.originalTrain)} → ${fmt(input.finalTrain)}); promoted best candidate.`,
+      reason: "train_improved",
+      message: `No val split — train mean quality rose (${fmt(originalTrain)} → ${fmt(finalTrain)}); promoted best candidate.`,
     };
   }
   return {
     promote: false,
     reason: "train_only",
-    message: `No val split — train mean quality did not strictly rise vs original baseline (${fmt(input.originalTrain)} → ${fmt(input.finalTrain)}); left unpromoted (promoted=false).`,
+    message: `No val split — train mean quality did not strictly rise vs original baseline (${fmt(originalTrain)} → ${fmt(finalTrain)}); left unpromoted (promoted=false).`,
   };
 }

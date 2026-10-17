@@ -393,6 +393,15 @@ describe("promotionDecision", () => {
     expect(decision.reason).toBe("train_only");
     expect(decision.message).toMatch(/train-only/);
   });
+
+  it("refuses auto-promote when a val score is missing instead of treating it as 0", () => {
+    const noBaseline = promotionDecision({ hasVal: true, valCandidate: 0.75 });
+    expect(noBaseline.promote).toBe(false);
+    expect(noBaseline.reason).toBe("missing_score");
+    expect(noBaseline.message).toMatch(/missing for the baseline/);
+    expect(promotionDecision({ hasVal: true, valBaseline: 0.5 }).promote).toBe(false);
+    expect(promotionDecision({ hasVal: true, valBaseline: Number.NaN, valCandidate: 1 }).promote).toBe(false);
+  });
 });
 
 describe("adoptDecision", () => {
@@ -463,6 +472,30 @@ describe("r1PromotionDecision", () => {
         finalTrain: 0.8,
       }).promote,
     ).toBe(true);
+  });
+
+  it("labels a train-only promote as a train rise", () => {
+    expect(r1PromotionDecision({ hasVal: false, originalTrain: 0.2, finalTrain: 0.8 }).reason).toBe(
+      "train_improved",
+    );
+  });
+
+  it("never promotes when the compared split is missing a score", () => {
+    const noBaselineVal = r1PromotionDecision({
+      hasVal: true,
+      finalVal: 1,
+      originalTrain: 0,
+      finalTrain: 1,
+    });
+    expect(noBaselineVal.promote).toBe(false);
+    expect(noBaselineVal.reason).toBe("missing_score");
+    expect(noBaselineVal.message).toMatch(/val mean quality is missing for the baseline/);
+    expect(r1PromotionDecision({ hasVal: true, originalVal: 0, originalTrain: 0, finalTrain: 1 }).promote).toBe(
+      false,
+    );
+    const noBaselineTrain = r1PromotionDecision({ hasVal: false, finalTrain: 1 });
+    expect(noBaselineTrain.promote).toBe(false);
+    expect(noBaselineTrain.message).toMatch(/train mean quality is missing for the baseline/);
   });
 });
 
