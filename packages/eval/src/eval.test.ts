@@ -443,6 +443,32 @@ describe("adoptDecision", () => {
       adoptDecision({ hasVal: false, currentTrain: 0.3, candidateTrain: 0.3 }).adopt,
     ).toBe(false);
   });
+
+  it("fails closed when a compared score is missing", () => {
+    const noCandidateVal = adoptDecision({
+      hasVal: true,
+      currentVal: 0,
+      currentTrain: 0.2,
+      candidateTrain: 1,
+    });
+    expect(noCandidateVal.adopt).toBe(false);
+    expect(noCandidateVal.reason).toBe("missing_score");
+    expect(
+      adoptDecision({ hasVal: true, candidateVal: 0.5, currentTrain: 0.2, candidateTrain: 0.2 }).reason,
+    ).toBe("missing_score");
+    expect(
+      adoptDecision({
+        hasVal: true,
+        currentVal: Number.NaN,
+        candidateVal: 1,
+        currentTrain: 0.2,
+        candidateTrain: 0.2,
+      }).adopt,
+    ).toBe(false);
+    expect(
+      adoptDecision({ hasVal: false, currentTrain: Number.NaN, candidateTrain: 1 }).reason,
+    ).toBe("missing_score");
+  });
 });
 
 describe("r1PromotionDecision", () => {

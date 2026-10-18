@@ -75,11 +75,11 @@ program
   .option("--no-allow-full-rewrite", "R0/R1: do not fall back to a full rewrite")
   .option(
     "--temperature <n>",
-    "R0/R1 student eval temperature (default 0, or suite.temperature). Rewriter stays colder.",
+    "Student eval temperature for R0/R1 and the R2 verify pass (default 0, or suite.temperature). Rewriter stays colder.",
   )
   .option(
     "--max-tokens <n>",
-    "R0/R1 student eval max_tokens (omit by default, or suite.max_tokens). 0 means omit.",
+    "Student eval max_tokens for R0/R1 and the R2 verify pass (omit by default, or suite.max_tokens). 0 means omit.",
   )
   .action(
     async (
@@ -152,6 +152,8 @@ program
           dryRun,
           noEval,
           budget: opts.budget,
+          temperature,
+          maxTokens,
         });
         if (result.dryRun) {
           console.log(`R2 dry-run ${result.run.id}: candidate ${result.version.id} (sidecar skipped)`);

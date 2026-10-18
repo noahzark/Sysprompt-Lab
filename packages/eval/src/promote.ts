@@ -65,12 +65,13 @@ export function promotionDecision(input: {
 
 export interface AdoptDecision {
   adopt: boolean;
-  reason: "val_improved" | "val_tie_train_improved" | "train_improved" | "no_improvement";
+  reason: "val_improved" | "val_tie_train_improved" | "train_improved" | "no_improvement" | "missing_score";
 }
 
 /**
  * R1 mid-loop adopt. If val exists, val must strictly rise; a val tie uses train
- * as the tie-break. Without val, train must strictly rise.
+ * as the tie-break. Without val, train must strictly rise. A missing score on a
+ * compared split never adopts.
  */
 export function adoptDecision(input: {
   hasVal: boolean;
@@ -79,16 +80,23 @@ export function adoptDecision(input: {
   currentTrain: number;
   candidateTrain: number;
 }): AdoptDecision {
+  const trainScored = isScore(input.currentTrain) && isScore(input.candidateTrain);
   if (input.hasVal) {
-    const currentVal = input.currentVal ?? 0;
-    const candidateVal = input.candidateVal ?? 0;
+    const currentVal = input.currentVal;
+    const candidateVal = input.candidateVal;
+    if (!isScore(currentVal) || !isScore(candidateVal)) {
+      return { adopt: false, reason: "missing_score" };
+    }
     if (candidateVal > currentVal) {
       return { adopt: true, reason: "val_improved" };
     }
-    if (candidateVal === currentVal && input.candidateTrain > input.currentTrain) {
+    if (candidateVal === currentVal && trainScored && input.candidateTrain > input.currentTrain) {
       return { adopt: true, reason: "val_tie_train_improved" };
     }
     return { adopt: false, reason: "no_improvement" };
+  }
+  if (!trainScored) {
+    return { adopt: false, reason: "missing_score" };
   }
   if (input.candidateTrain > input.currentTrain) {
     return { adopt: true, reason: "train_improved" };

@@ -4,9 +4,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { unifiedPromptDiff } from "@sysprompt-lab/core";
-import { casesForSplit, formatScoreTable, type ScoreRow } from "@sysprompt-lab/eval";
+import {
+  aggregateScore,
+  casesForSplit,
+  evaluatePrompt,
+  formatScoreTable,
+  type ScoreRow,
+  type SplitEval,
+} from "@sysprompt-lab/eval";
 import { formatLlmTarget, getLlmConfig, readLlmConfig, type LlmConfig } from "@sysprompt-lab/llm";
-import { normalizeLlmApiBase } from "@sysprompt-lab/llm";
+import { type FetchFn, normalizeLlmApiBase } from "@sysprompt-lab/llm";
 import { r1PromotionDecision } from "@sysprompt-lab/eval";
 import {
   type Candidate,
@@ -78,6 +85,12 @@ export interface RunR2Options {
   budget?: string | number;
   python?: string;
   sidecar?: (job: R2Job) => Promise<SidecarResult>;
+  /** Used by the TypeScript verify pass (baseline vs best_prompt), not by the sidecar. */
+  fetch?: FetchFn;
+  /** Student sampling for the verify pass. CLI / suite.temperature override default 0. */
+  temperature?: number;
+  maxTokens?: number;
+  imageDir?: string;
 }
 
 export interface RunR2Result {
@@ -132,6 +145,70 @@ function llmTargetLine(config: LlmConfig): string {
 function reflectionConfig(student: LlmConfig): LlmConfig {
   const model = process.env.LLM_REFLECTION_MODEL?.trim();
   return model ? { ...student, model } : student;
+}
+
+function studentEvalExtras(card: PromptCard, options: RunR2Options) {
+  const envDir = process.env.SYSPROMPT_IMAGE_DIR?.trim();
+  return {
+    fetch: options.fetch,
+    temperature: options.temperature,
+    max_tokens: options.maxTokens,
+    imageDir: options.imageDir ?? (envDir || card.source),
+  };
+}
+
+interface R2Verify {
+  baselineTrain: SplitEval;
+  baselineVal?: SplitEval;
+  train: SplitEval;
+  val?: SplitEval;
+}
+
+/**
+ * Re-score baseline and GEPA's best prompt with the suite metric in TypeScript.
+ * The sidecar keeps its own scorer for search; the promote gate only trusts these.
+ */
+async function verifyBestPrompt(input: {
+  llm: LlmConfig;
+  suite: EvalSuite;
+  hasVal: boolean;
+  baseline: PromptVersion;
+  version: PromptVersion;
+  extras: ReturnType<typeof studentEvalExtras>;
+}): Promise<R2Verify> {
+  const evalSplit = (version: PromptVersion, split: "train" | "val") =>
+    evaluatePrompt({
+      config: input.llm,
+      systemPrompt: version.system_prompt,
+      versionId: version.id,
+      suite: input.suite,
+      split,
+      ...input.extras,
+    });
+  const baselineTrain = await evalSplit(input.baseline, "train");
+  const baselineVal = input.hasVal ? await evalSplit(input.baseline, "val") : undefined;
+  if (input.version.system_prompt === input.baseline.system_prompt) {
+    return { baselineTrain, baselineVal, train: baselineTrain, val: baselineVal };
+  }
+  const train = await evalSplit(input.version, "train");
+  const val = input.hasVal ? await evalSplit(input.version, "val") : undefined;
+  return { baselineTrain, baselineVal, train, val };
+}
+
+function verifyScores(verify: R2Verify, baselineId: string, versionId: string, modelId: string, metricId: string): Score[] {
+  const scores: Score[] = [];
+  const add = (evalResult: SplitEval | undefined, id: string) => {
+    if (evalResult) {
+      scores.push(...evalResult.scores, aggregateScore(evalResult, id, modelId, metricId));
+    }
+  };
+  add(verify.baselineTrain, baselineId);
+  add(verify.baselineVal, baselineId);
+  if (verify.train !== verify.baselineTrain) {
+    add(verify.train, versionId);
+    add(verify.val, versionId);
+  }
+  return scores;
 }
 
 function markPromoted(card: PromptCard, versionId: string): void {
@@ -355,6 +432,8 @@ function buildSummary(input: {
   table?: string;
   sidecar?: SidecarResult;
   dryRun: boolean;
+  /** True when the table comes from the TypeScript verify pass. */
+  verified?: boolean;
 }): string {
   const lines = [
     `# R2 ${input.runId}`,
@@ -376,6 +455,17 @@ function buildSummary(input: {
   }
   if (input.table) {
     lines.push("", "## Scores", "", "```", input.table, "```");
+  }
+  if (input.verified && input.sidecar) {
+    const s = input.sidecar;
+    const f = (n?: number) => (typeof n === "number" ? n.toFixed(3) : "—");
+    lines.push(
+      "",
+      "## GEPA-reported scores (diagnostic, not used by the gate)",
+      "",
+      `- train: ${f(s.baseline_train)} → ${f(s.train_score)}`,
+      `- val: ${f(s.baseline_val)} → ${f(s.val_score)}`,
+    );
   }
   return `${lines.join("\n")}\n`;
 }
@@ -487,19 +577,31 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
     pushModel(card, reflection.model);
   }
 
-  const scores = scoresFromSidecar(parsed, baseline.id, version.id, llm.model, suite.metric.id, hasVal);
-  const decision = options.noEval
-    ? {
+  const verify = options.noEval
+    ? undefined
+    : await verifyBestPrompt({
+        llm,
+        suite,
+        hasVal,
+        baseline,
+        version,
+        extras: studentEvalExtras(card, options),
+      });
+  const scores = verify
+    ? verifyScores(verify, baseline.id, version.id, llm.model, suite.metric.id)
+    : scoresFromSidecar(parsed, baseline.id, version.id, llm.model, suite.metric.id, hasVal);
+  const decision = verify
+    ? r1PromotionDecision({
+        hasVal,
+        originalVal: verify.baselineVal?.meanQuality,
+        finalVal: verify.val?.meanQuality,
+        originalTrain: verify.baselineTrain.meanQuality,
+        finalTrain: verify.train.meanQuality,
+      })
+    : {
         promote: false,
         message: "Rewrite only (--no-eval); skipped auto-promote after the GEPA wrap.",
-      }
-    : r1PromotionDecision({
-        hasVal,
-        originalVal: parsed.baseline_val,
-        finalVal: parsed.val_score,
-        originalTrain: parsed.baseline_train,
-        finalTrain: parsed.train_score,
-      });
+      };
 
   if (decision.promote && version.system_prompt !== baseline.system_prompt) {
     markPromoted(card, version.id);
@@ -510,14 +612,26 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
   writeCard(ws, card);
 
   const rows: ScoreRow[] = [];
-  if (parsed.baseline_train !== undefined && parsed.train_score !== undefined) {
+  if (verify) {
+    const row = (split: "train" | "val", base: SplitEval, cand: SplitEval): ScoreRow => ({
+      split,
+      baselineQuality: base.meanQuality,
+      candidateQuality: cand.meanQuality,
+      baselineLatency: base.scores.length === 0 ? undefined : base.meanLatency,
+      candidateLatency: cand.scores.length === 0 ? undefined : cand.meanLatency,
+    });
+    rows.push(row("train", verify.baselineTrain, verify.train));
+    if (verify.baselineVal && verify.val) {
+      rows.push(row("val", verify.baselineVal, verify.val));
+    }
+  } else if (parsed.baseline_train !== undefined && parsed.train_score !== undefined) {
     rows.push({
       split: "train",
       baselineQuality: parsed.baseline_train,
       candidateQuality: parsed.train_score,
     });
   }
-  if (hasVal && parsed.baseline_val !== undefined && parsed.val_score !== undefined) {
+  if (!verify && hasVal && parsed.baseline_val !== undefined && parsed.val_score !== undefined) {
     rows.push({
       split: "val",
       baselineQuality: parsed.baseline_val,
@@ -533,10 +647,14 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
       status: candidate.status,
       version_id: version.id,
       hypothesis: version.hypothesis,
-      train_quality: parsed.train_score,
-      val_quality: parsed.val_score,
-      baseline_train: parsed.baseline_train,
-      baseline_val: parsed.baseline_val,
+      train_quality: verify ? verify.train.meanQuality : parsed.train_score,
+      val_quality: verify ? verify.val?.meanQuality : parsed.val_score,
+      baseline_train: verify ? verify.baselineTrain.meanQuality : parsed.baseline_train,
+      baseline_val: verify ? verify.baselineVal?.meanQuality : parsed.baseline_val,
+      gepa_train: parsed.train_score,
+      gepa_val: parsed.val_score,
+      gepa_baseline_train: parsed.baseline_train,
+      gepa_baseline_val: parsed.baseline_val,
       total_metric_calls: parsed.total_metric_calls,
     },
     ...(parsed.history ?? []).map((row, index) => ({ idx: index, ...(row as object) })),
@@ -555,6 +673,7 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
       table,
       sidecar: parsed,
       dryRun: false,
+      verified: Boolean(verify),
     }),
   });
   const sidecarPath = join(ws.runsDir, run.id, "sidecar.json");
