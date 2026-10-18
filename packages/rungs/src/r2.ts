@@ -3,18 +3,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { unifiedPromptDiff } from "@sysprompt-lab/core";
 import {
-  aggregateScore,
   casesForSplit,
-  evaluatePrompt,
   formatScoreTable,
+  r1PromotionDecision,
   type ScoreRow,
   type SplitEval,
 } from "@sysprompt-lab/eval";
-import { formatLlmTarget, getLlmConfig, readLlmConfig, type LlmConfig } from "@sysprompt-lab/llm";
+import { getLlmConfig, type LlmConfig } from "@sysprompt-lab/llm";
 import { type FetchFn, normalizeLlmApiBase } from "@sysprompt-lab/llm";
-import { r1PromotionDecision } from "@sysprompt-lab/eval";
 import {
   type Candidate,
   type EvalCase,
@@ -25,16 +22,16 @@ import {
   type Score,
   baselineVersion,
 } from "@sysprompt-lab/core";
+import { type Workspace, findRepoRoot, loadCard, loadSuite, openWorkspace } from "@sysprompt-lab/core";
 import {
-  type Workspace,
-  findRepoRoot,
-  loadCard,
-  loadSuite,
-  newId,
-  openWorkspace,
-  writeCard,
-  writeRun,
-} from "@sysprompt-lab/core";
+  RunSession,
+  StudentEval,
+  assertBound,
+  llmTargetLine,
+  optionalLlmTarget,
+  pushModel,
+  scoreRow,
+} from "./pipeline.js";
 
 const R2_ENV_BUDGET = "SYSPROMPT_R2_BUDGET";
 const R2_ENV_PYTHON = "SYSPROMPT_PYTHON";
@@ -138,23 +135,9 @@ export function resolveR2Budget(input?: string | number): R2Budget {
   return { name: `calls:${n}`, maxMetricCalls: asPositiveInt(n, "--budget") };
 }
 
-function llmTargetLine(config: LlmConfig): string {
-  return formatLlmTarget({ ...config, apiBase: normalizeLlmApiBase(config.apiBase) });
-}
-
 function reflectionConfig(student: LlmConfig): LlmConfig {
   const model = process.env.LLM_REFLECTION_MODEL?.trim();
   return model ? { ...student, model } : student;
-}
-
-function studentEvalExtras(card: PromptCard, options: RunR2Options) {
-  const envDir = process.env.SYSPROMPT_IMAGE_DIR?.trim();
-  return {
-    fetch: options.fetch,
-    temperature: options.temperature,
-    max_tokens: options.maxTokens,
-    imageDir: options.imageDir ?? (envDir || card.source),
-  };
 }
 
 interface R2Verify {
@@ -168,68 +151,20 @@ interface R2Verify {
  * Re-score baseline and GEPA's best prompt with the suite metric in TypeScript.
  * The sidecar keeps its own scorer for search; the promote gate only trusts these.
  */
-async function verifyBestPrompt(input: {
-  llm: LlmConfig;
-  suite: EvalSuite;
-  hasVal: boolean;
-  baseline: PromptVersion;
-  version: PromptVersion;
-  extras: ReturnType<typeof studentEvalExtras>;
-}): Promise<R2Verify> {
-  const evalSplit = (version: PromptVersion, split: "train" | "val") =>
-    evaluatePrompt({
-      config: input.llm,
-      systemPrompt: version.system_prompt,
-      versionId: version.id,
-      suite: input.suite,
-      split,
-      ...input.extras,
-    });
-  const baselineTrain = await evalSplit(input.baseline, "train");
-  const baselineVal = input.hasVal ? await evalSplit(input.baseline, "val") : undefined;
-  if (input.version.system_prompt === input.baseline.system_prompt) {
+async function verifyBestPrompt(
+  student: StudentEval,
+  hasVal: boolean,
+  baseline: PromptVersion,
+  version: PromptVersion,
+): Promise<R2Verify> {
+  const baselineTrain = await student.evaluate(baseline, "train");
+  const baselineVal = hasVal ? await student.evaluate(baseline, "val") : undefined;
+  if (version.system_prompt === baseline.system_prompt) {
     return { baselineTrain, baselineVal, train: baselineTrain, val: baselineVal };
   }
-  const train = await evalSplit(input.version, "train");
-  const val = input.hasVal ? await evalSplit(input.version, "val") : undefined;
+  const train = await student.evaluate(version, "train");
+  const val = hasVal ? await student.evaluate(version, "val") : undefined;
   return { baselineTrain, baselineVal, train, val };
-}
-
-function verifyScores(verify: R2Verify, baselineId: string, versionId: string, modelId: string, metricId: string): Score[] {
-  const scores: Score[] = [];
-  const add = (evalResult: SplitEval | undefined, id: string) => {
-    if (evalResult) {
-      scores.push(...evalResult.scores, aggregateScore(evalResult, id, modelId, metricId));
-    }
-  };
-  add(verify.baselineTrain, baselineId);
-  add(verify.baselineVal, baselineId);
-  if (verify.train !== verify.baselineTrain) {
-    add(verify.train, versionId);
-    add(verify.val, versionId);
-  }
-  return scores;
-}
-
-function markPromoted(card: PromptCard, versionId: string): void {
-  for (const version of card.versions) {
-    version.promoted = version.id === versionId;
-  }
-  card.status = "promoted";
-}
-
-function assertR2Ready(card: PromptCard): void {
-  if (!card.suite_id || card.status === "draft") {
-    throw new Error(
-      `Card "${card.id}" must be bound to a suite before run --rung R2. Run: sysprompt bind ${card.id} <suite.yaml>`,
-    );
-  }
-}
-
-function pushModel(card: PromptCard, model: string): void {
-  if (!card.models.some((item) => item.id === model)) {
-    card.models.push({ id: model, provider: "openai-compatible", name: model });
-  }
 }
 
 function packageRoot(): string {
@@ -497,7 +432,7 @@ function scoresFromSidecar(
 export async function runR2(cardRef: string, options: RunR2Options = {}): Promise<RunR2Result> {
   const ws = openWorkspace(options.root);
   const card = loadCard(ws, cardRef);
-  assertR2Ready(card);
+  assertBound(card, "R2");
   const baseline = baselineVersion(card);
   const suite = loadSuite(ws, card.suite_id!);
   const train = casesForSplit(suite, "train");
@@ -546,32 +481,14 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
     : await runOfficialSidecar(job, options.python);
   const parsed = parseSidecarResult(sidecar);
 
-  const version: PromptVersion = {
-    id: newId("ver"),
-    system_prompt: parsed.best_prompt,
+  const session = new RunSession(ws, card, "R2", budget.maxMetricCalls);
+  const { version, candidate } = session.addCandidate({
+    prompt: parsed.best_prompt,
     hypothesis: parsed.hypothesis ?? `GEPA wrap (${budget.name})`,
-    is_baseline: false,
-    promoted: false,
-    parent: baseline.id,
-  };
-  const candidate: Candidate = {
-    id: newId("cand"),
+    parent: baseline,
     round: 0,
-    pass_streak: 0,
     status: "evaluated",
-    version_id: version.id,
-  };
-
-  const run: Run = {
-    id: newId("run"),
-    card_id: card.id,
-    rung: "R2",
-    status: "completed",
-    budget: budget.maxMetricCalls,
-  };
-  card.versions.push(version);
-  card.rung = "R2";
-  card.status = "optimizing";
+  });
   pushModel(card, llm.model);
   if (reflection.model !== llm.model) {
     pushModel(card, reflection.model);
@@ -579,16 +496,9 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
 
   const verify = options.noEval
     ? undefined
-    : await verifyBestPrompt({
-        llm,
-        suite,
-        hasVal,
-        baseline,
-        version,
-        extras: studentEvalExtras(card, options),
-      });
+    : await verifyBestPrompt(new StudentEval(session, llm, suite, options), hasVal, baseline, version);
   const scores = verify
-    ? verifyScores(verify, baseline.id, version.id, llm.model, suite.metric.id)
+    ? session.scores
     : scoresFromSidecar(parsed, baseline.id, version.id, llm.model, suite.metric.id, hasVal);
   const decision = verify
     ? r1PromotionDecision({
@@ -603,26 +513,18 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
         message: "Rewrite only (--no-eval); skipped auto-promote after the GEPA wrap.",
       };
 
-  if (decision.promote && version.system_prompt !== baseline.system_prompt) {
-    markPromoted(card, version.id);
+  const promoted = decision.promote && version.system_prompt !== baseline.system_prompt;
+  session.settle(promoted, version.id);
+  if (promoted) {
     candidate.status = "promoted";
-  } else {
-    card.status = "verifying";
   }
-  writeCard(ws, card);
+  session.saveCard();
 
   const rows: ScoreRow[] = [];
   if (verify) {
-    const row = (split: "train" | "val", base: SplitEval, cand: SplitEval): ScoreRow => ({
-      split,
-      baselineQuality: base.meanQuality,
-      candidateQuality: cand.meanQuality,
-      baselineLatency: base.scores.length === 0 ? undefined : base.meanLatency,
-      candidateLatency: cand.scores.length === 0 ? undefined : cand.meanLatency,
-    });
-    rows.push(row("train", verify.baselineTrain, verify.train));
+    rows.push(scoreRow("train", verify.baselineTrain, verify.train));
     if (verify.baselineVal && verify.val) {
-      rows.push(row("val", verify.baselineVal, verify.val));
+      rows.push(scoreRow("val", verify.baselineVal, verify.val));
     }
   } else if (parsed.baseline_train !== undefined && parsed.train_score !== undefined) {
     rows.push({
@@ -639,7 +541,6 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
     });
   }
   const table = rows.length > 0 ? formatScoreTable(rows) : undefined;
-  const diff = unifiedPromptDiff(baseline.system_prompt, version.system_prompt);
   const lineage = [
     {
       id: candidate.id,
@@ -659,16 +560,15 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
     },
     ...(parsed.history ?? []).map((row, index) => ({ idx: index, ...(row as object) })),
   ];
-  const written = writeRun(ws, run, [candidate], {
-    diff,
+  const written = session.write(baseline, version, {
     diffName: "r2.diff",
     scores: scores.length > 0 ? scores : undefined,
     candidatesJsonl: lineage,
     summary: buildSummary({
-      runId: run.id,
+      runId: session.run.id,
       cardId: card.id,
       budget,
-      promoted: decision.promote && version.system_prompt !== baseline.system_prompt,
+      promoted,
       message: decision.message,
       table,
       sidecar: parsed,
@@ -676,13 +576,13 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
       verified: Boolean(verify),
     }),
   });
-  const sidecarPath = join(ws.runsDir, run.id, "sidecar.json");
+  const sidecarPath = join(written.dir, "sidecar.json");
   writeFileSync(sidecarPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
 
   return {
     card,
-    run,
-    candidates: [candidate],
+    run: session.run,
+    candidates: session.candidates,
     version,
     diffPath: written.diffPath!,
     scoresPath: written.scoresPath,
@@ -690,7 +590,7 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
     summaryPath: written.summaryPath,
     sidecarPath,
     scores,
-    promoted: decision.promote && version.system_prompt !== baseline.system_prompt,
+    promoted,
     dryRun: false,
     table,
     message: decision.message,
@@ -700,38 +600,18 @@ export async function runR2(cardRef: string, options: RunR2Options = {}): Promis
 }
 
 function runDryR2(ws: Workspace, card: PromptCard, baseline: PromptVersion, budget: R2Budget): RunR2Result {
-  const version: PromptVersion = {
-    id: newId("ver"),
-    system_prompt: `${baseline.system_prompt.replace(/\s+$/g, "")}\n\n[R2 dry-run candidate: GEPA sidecar skipped]`,
+  const session = new RunSession(ws, card, "R2", budget.maxMetricCalls);
+  const { version, candidate } = session.addCandidate({
+    prompt: `${baseline.system_prompt.replace(/\s+$/g, "")}\n\n[R2 dry-run candidate: GEPA sidecar skipped]`,
     hypothesis: "R2 dry-run (GEPA wrap skipped)",
-    is_baseline: false,
-    promoted: false,
-    parent: baseline.id,
-  };
-  const candidate: Candidate = {
-    id: newId("cand"),
+    parent: baseline,
     round: 0,
-    pass_streak: 0,
     status: "stub",
-    version_id: version.id,
-  };
-  const run: Run = {
-    id: newId("run"),
-    card_id: card.id,
-    rung: "R2",
-    status: "completed",
-    budget: budget.maxMetricCalls,
-  };
-  card.versions.push(version);
-  card.rung = "R2";
-  card.status = "optimizing";
-  writeCard(ws, card);
+  });
+  session.saveCard();
 
-  const diff = unifiedPromptDiff(baseline.system_prompt, version.system_prompt);
-  const llm = readLlmConfig();
   const message = "R2 dry-run stub (GEPA sidecar skipped, no LLM calls).";
-  const written = writeRun(ws, run, [candidate], {
-    diff,
+  const written = session.write(baseline, version, {
     diffName: "r2.diff",
     candidatesJsonl: [
       {
@@ -743,7 +623,7 @@ function runDryR2(ws: Workspace, card: PromptCard, baseline: PromptVersion, budg
       },
     ],
     summary: buildSummary({
-      runId: run.id,
+      runId: session.run.id,
       cardId: card.id,
       budget,
       promoted: false,
@@ -754,8 +634,8 @@ function runDryR2(ws: Workspace, card: PromptCard, baseline: PromptVersion, budg
 
   return {
     card,
-    run,
-    candidates: [candidate],
+    run: session.run,
+    candidates: session.candidates,
     version,
     diffPath: written.diffPath!,
     candidatesJsonlPath: written.candidatesJsonlPath,
@@ -764,7 +644,7 @@ function runDryR2(ws: Workspace, card: PromptCard, baseline: PromptVersion, budg
     promoted: false,
     dryRun: true,
     message,
-    llmTarget: llm ? llmTargetLine(llm) : undefined,
+    llmTarget: optionalLlmTarget(),
     budget,
   };
 }
