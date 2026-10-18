@@ -12,6 +12,8 @@ Load a card, call the right optimizer, write run artifacts (`.spl/runs/<id>/`), 
 - `runR1` / `resolveR1Config` — eval-loop; evidence helpers (`formatEvidence`, `selectEvidenceCases`, …)
 - `runR2` / `resolveR2Budget` / `resolvePython` / `parseSidecarResult` — wrap `python -m sysprompt_gepa`
 
+Internally, `pipeline.ts` holds what every rung shares: `RunSession` (run record, version + candidate bookkeeping, `candidates.jsonl` rows, promote/hold, run artifacts) and `StudentEval` (suite-metric eval of one version on one split, scores collected on the session). Rung files keep only their search policy: R0 one proposal, R1 the evidence → propose → adopt loop, R2 the sidecar job and the TypeScript verify pass.
+
 R2 TypeScript stays here. The sidecar stays at repo-root `python/` (JSON job in / JSON result out). Override the interpreter with `SYSPROMPT_PYTHON`. `--dry-run` must not spawn Python.
 
 ```ts

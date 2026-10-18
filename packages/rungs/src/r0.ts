@@ -1,7 +1,6 @@
-import { unifiedPromptDiff } from "@sysprompt-lab/core";
-import { formatScoreTable, evaluatePrompt, aggregateScore, casesForSplit, type ScoreRow } from "@sysprompt-lab/eval";
-import { formatLlmTarget, getLlmConfig, readLlmConfig, type LlmConfig } from "@sysprompt-lab/llm";
-import { type FetchFn, normalizeLlmApiBase } from "@sysprompt-lab/llm";
+import { casesForSplit, formatScoreTable, promotionDecision, type ScoreRow } from "@sysprompt-lab/eval";
+import { getLlmConfig } from "@sysprompt-lab/llm";
+import { type FetchFn } from "@sysprompt-lab/llm";
 import {
   type RewriteMode,
   dryRunPatch,
@@ -9,11 +8,10 @@ import {
   resolveEffectiveRewriteMode,
   resolveMaxPatchRatio,
   resolvePatchThreshold,
+  rewriteSystemPrompt,
   sectionMapArtifact,
   splitSections,
 } from "@sysprompt-lab/rewrite";
-import { promotionDecision } from "@sysprompt-lab/eval";
-import { rewriteSystemPrompt } from "@sysprompt-lab/rewrite";
 import {
   type Candidate,
   type PromptCard,
@@ -22,15 +20,15 @@ import {
   type Score,
   baselineVersion,
 } from "@sysprompt-lab/core";
+import { type Workspace, loadCard, loadSuite, openWorkspace } from "@sysprompt-lab/core";
 import {
-  type Workspace,
-  loadCard,
-  loadSuite,
-  newId,
-  openWorkspace,
-  writeCard,
-  writeRun,
-} from "@sysprompt-lab/core";
+  RunSession,
+  StudentEval,
+  llmTargetLine,
+  optionalLlmTarget,
+  pushModel,
+  scoreRow,
+} from "./pipeline.js";
 
 export interface RunR0Options {
   root?: string;
@@ -62,27 +60,6 @@ export interface RunR0Result {
   rewriteMode?: "patch" | "full";
   sectionsPath?: string;
   patchPath?: string;
-}
-
-function llmTargetLine(config: LlmConfig): string {
-  return formatLlmTarget({ ...config, apiBase: normalizeLlmApiBase(config.apiBase) });
-}
-
-function studentEvalExtras(card: PromptCard, options: RunR0Options) {
-  const envDir = process.env.SYSPROMPT_IMAGE_DIR?.trim();
-  return {
-    fetch: options.fetch,
-    temperature: options.temperature,
-    max_tokens: options.maxTokens,
-    imageDir: options.imageDir ?? (envDir || card.source),
-  };
-}
-
-function markPromoted(card: PromptCard, versionId: string): void {
-  for (const version of card.versions) {
-    version.promoted = version.id === versionId;
-  }
-  card.status = "promoted";
 }
 
 export async function runR0(cardRef: string, options: RunR0Options = {}): Promise<RunR0Result> {
@@ -120,101 +97,52 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
     sourceChars: baseline.system_prompt.length,
   });
 
-  const version: PromptVersion = {
-    id: newId("ver"),
-    system_prompt: rewritten.system_prompt,
+  const session = new RunSession(ws, card, "R0");
+  const { version, candidate } = session.addCandidate({
+    prompt: rewritten.system_prompt,
     hypothesis: rewritten.hypothesis,
-    is_baseline: false,
-    promoted: false,
-    parent: baseline.id,
-  };
-  const candidate: Candidate = {
-    id: newId("cand"),
+    parent: baseline,
     round: 0,
-    pass_streak: 0,
     status: options.noEval ? "rewritten" : "evaluated",
-    version_id: version.id,
-  };
-  const run: Run = {
-    id: newId("run"),
-    card_id: card.id,
-    rung: "R0",
-    status: "completed",
-  };
-  card.versions.push(version);
-  card.rung = "R0";
-  card.status = "optimizing";
-  if (!card.models.some((m) => m.id === config.model)) {
-    card.models.push({ id: config.model, provider: "openai-compatible", name: config.model });
-  }
-  writeCard(ws, card);
+  });
+  pushModel(card, config.model);
+  session.saveCard();
 
-  const diff = unifiedPromptDiff(baseline.system_prompt, version.system_prompt);
+  const shared = {
+    card,
+    run: session.run,
+    candidate,
+    version,
+    dryRun: false,
+    llmTarget,
+    rewriteMode: effectiveMode,
+  };
 
   if (options.noEval) {
-    const written = writeRun(ws, run, [candidate], {
-      diff,
-      sections: sectionArtifact,
-      patch: rewritten.patch,
-    });
-    if (!written.diffPath) {
-      throw new Error("R0 failed to write a unified diff");
-    }
+    const written = session.write(baseline, version, { sections: sectionArtifact, patch: rewritten.patch });
     return {
-      card,
-      run,
-      candidate,
-      version,
-      diffPath: written.diffPath,
+      ...shared,
+      diffPath: requireDiff(written.diffPath, "R0"),
       scores: [],
       promoted: false,
-      dryRun: false,
       message: "Rewrite only (--no-eval); skipped before/after eval and auto-promote.",
-      llmTarget,
-      rewriteMode: effectiveMode,
       sectionsPath: written.sectionsPath,
       patchPath: written.patchPath,
     };
   }
 
   const suite = loadSuite(ws, card.suite_id!);
-  const splits = (["train", "val"] as const).filter((name) => casesForSplit(suite, name).length > 0);
-  const scores: Score[] = [];
+  const student = new StudentEval(session, config, suite, options);
   const rows: ScoreRow[] = [];
   let valBaseline: number | undefined;
   let valCandidate: number | undefined;
-
-  for (const split of splits) {
-    const extras = studentEvalExtras(card, options);
-    const baselineEval = await evaluatePrompt({
-      config,
-      systemPrompt: baseline.system_prompt,
-      versionId: baseline.id,
-      suite,
-      split,
-      ...extras,
-    });
-    const candidateEval = await evaluatePrompt({
-      config,
-      systemPrompt: version.system_prompt,
-      versionId: version.id,
-      suite,
-      split,
-      ...extras,
-    });
-    scores.push(
-      ...baselineEval.scores,
-      aggregateScore(baselineEval, baseline.id, config.model, suite.metric.id),
-      ...candidateEval.scores,
-      aggregateScore(candidateEval, version.id, config.model, suite.metric.id),
-    );
-    rows.push({
-      split,
-      baselineQuality: baselineEval.meanQuality,
-      candidateQuality: candidateEval.meanQuality,
-      baselineLatency: baselineEval.scores.length === 0 ? undefined : baselineEval.meanLatency,
-      candidateLatency: candidateEval.scores.length === 0 ? undefined : candidateEval.meanLatency,
-    });
+  for (const split of ["train", "val"] as const) {
+    if (casesForSplit(suite, split).length === 0) {
+      continue;
+    }
+    const baselineEval = await student.evaluate(baseline, split);
+    const candidateEval = await student.evaluate(version, split);
+    rows.push(scoreRow(split, baselineEval, candidateEval));
     if (split === "val") {
       valBaseline = baselineEval.meanQuality;
       valCandidate = candidateEval.meanQuality;
@@ -223,42 +151,33 @@ export async function runR0(cardRef: string, options: RunR0Options = {}): Promis
 
   const hasVal = casesForSplit(suite, "val").length > 0;
   const decision = promotionDecision({ hasVal, valBaseline, valCandidate });
-  if (decision.promote) {
-    markPromoted(card, version.id);
-    candidate.status = "promoted";
-  } else {
-    card.status = "verifying";
-    candidate.status = "evaluated";
-  }
-  writeCard(ws, card);
+  session.settle(decision.promote, version.id);
+  candidate.status = decision.promote ? "promoted" : "evaluated";
+  session.saveCard();
 
-  const written = writeRun(ws, run, [candidate], {
-    diff,
-    scores,
+  const written = session.write(baseline, version, {
+    scores: session.scores,
     sections: sectionArtifact,
     patch: rewritten.patch,
   });
-  if (!written.diffPath) {
-    throw new Error("R0 failed to write a unified diff");
-  }
-
   return {
-    card,
-    run,
-    candidate,
-    version,
-    diffPath: written.diffPath,
+    ...shared,
+    diffPath: requireDiff(written.diffPath, "R0"),
     scoresPath: written.scoresPath,
-    scores,
+    scores: session.scores,
     promoted: decision.promote,
-    dryRun: false,
     table: rows.length > 0 ? formatScoreTable(rows) : undefined,
     message: decision.message,
-    llmTarget,
-    rewriteMode: effectiveMode,
     sectionsPath: written.sectionsPath,
     patchPath: written.patchPath,
   };
+}
+
+function requireDiff(path: string | undefined, label: string): string {
+  if (!path) {
+    throw new Error(`${label} failed to write a unified diff`);
+  }
+  return path;
 }
 
 function runDryStub(
@@ -268,39 +187,21 @@ function runDryStub(
   options: RunR0Options,
 ): RunR0Result {
   const patched = dryRunPatch(baseline.system_prompt, "[R0 dry-run stub]");
-  const version: PromptVersion = {
-    id: newId("ver"),
-    system_prompt: patched.prompt,
+  const session = new RunSession(ws, card, "R0");
+  const { version, candidate } = session.addCandidate({
+    prompt: patched.prompt,
     hypothesis: "stub",
-    is_baseline: false,
-    promoted: false,
-    parent: baseline.id,
-  };
-  const candidate: Candidate = {
-    id: newId("cand"),
+    parent: baseline,
     round: 0,
-    pass_streak: 0,
     status: "stub",
-    version_id: version.id,
-  };
-  const run: Run = {
-    id: newId("run"),
-    card_id: card.id,
-    rung: "R0",
-    status: "completed",
-  };
-  card.versions.push(version);
-  card.rung = "R0";
-  card.status = "optimizing";
-  writeCard(ws, card);
-  const diff = unifiedPromptDiff(baseline.system_prompt, version.system_prompt);
+  });
+  session.saveCard();
   const effectiveMode = resolveEffectiveRewriteMode(
     options.rewriteMode ?? "auto",
     baseline.system_prompt,
     resolvePatchThreshold(),
   );
-  const written = writeRun(ws, run, [candidate], {
-    diff,
+  const written = session.write(baseline, version, {
     sections: sectionMapArtifact({
       sections: patched.sections,
       rewriteMode: options.rewriteMode ?? "auto",
@@ -312,21 +213,17 @@ function runDryStub(
     }),
     patch: { hypothesis: "stub", edits: patched.edits, kind: "edits" },
   });
-  if (!written.diffPath) {
-    throw new Error("R0 stub failed to write a unified diff");
-  }
-  const llm = readLlmConfig();
   return {
     card,
-    run,
+    run: session.run,
     candidate,
     version,
-    diffPath: written.diffPath,
+    diffPath: requireDiff(written.diffPath, "R0 stub"),
     scores: [],
     promoted: false,
     dryRun: true,
     message: "R0 dry-run stub (no LLM calls).",
-    llmTarget: llm ? llmTargetLine(llm) : undefined,
+    llmTarget: optionalLlmTarget(),
     rewriteMode: effectiveMode,
     sectionsPath: written.sectionsPath,
     patchPath: written.patchPath,

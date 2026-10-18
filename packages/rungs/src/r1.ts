@@ -1,18 +1,22 @@
-import { unifiedPromptDiff } from "@sysprompt-lab/core";
 import {
-  aggregateScore,
+  adoptDecision,
   casesForSplit,
-  evaluatePrompt,
   formatScoreTable,
+  r1PromotionDecision,
   type ScoreRow,
   type SplitEval,
 } from "@sysprompt-lab/eval";
-import { formatLlmTarget, getLlmConfig, readLlmConfig, type LlmConfig } from "@sysprompt-lab/llm";
-import { type FetchFn, normalizeLlmApiBase } from "@sysprompt-lab/llm";
+import { getLlmConfig, type LlmConfig } from "@sysprompt-lab/llm";
+import { type FetchFn } from "@sysprompt-lab/llm";
 import {
   type EffectiveRewriteMode,
+  type R1Proposal,
   type RewriteMode,
+  dedupeProposals,
+  dryRunProposals,
   parseRewriteMode,
+  promptKey,
+  proposeR1Candidates,
   resolveAllowFullRewrite,
   resolveEffectiveRewriteMode,
   resolveMaxPatchRatio,
@@ -20,7 +24,6 @@ import {
   sectionMapArtifact,
   splitSections,
 } from "@sysprompt-lab/rewrite";
-import { adoptDecision, r1PromotionDecision } from "@sysprompt-lab/eval";
 import {
   type EvidencePack,
   type SearchHistoryEntry,
@@ -28,29 +31,26 @@ import {
   selectEvidenceCases,
 } from "./r1-evidence.js";
 import {
-  type R1Proposal,
-  dedupeProposals,
-  dryRunProposals,
-  promptKey,
-  proposeR1Candidates,
-} from "@sysprompt-lab/rewrite";
-import {
   type Candidate,
+  type EvalSuite,
   type PromptCard,
   type PromptVersion,
   type Run,
   type Score,
   baselineVersion,
 } from "@sysprompt-lab/core";
+import { type Workspace, loadCard, loadSuite, openWorkspace } from "@sysprompt-lab/core";
 import {
-  type Workspace,
-  loadCard,
-  loadSuite,
-  newId,
-  openWorkspace,
-  writeCard,
-  writeRun,
-} from "@sysprompt-lab/core";
+  type AddedCandidate,
+  type CandidateRecord,
+  RunSession,
+  StudentEval,
+  assertBound,
+  llmTargetLine,
+  optionalLlmTarget,
+  pushModel,
+  scoreRow,
+} from "./pipeline.js";
 
 const R1_ENV = {
   rounds: "SYSPROMPT_R1_ROUNDS",
@@ -84,17 +84,8 @@ export interface RunR1Options {
   imageDir?: string;
 }
 
-export interface R1TriedCandidate {
-  id: string;
-  round: number;
-  pass_streak: number;
-  status: string;
-  version_id: string;
-  parent_candidate_id?: string;
-  hypothesis: string;
-  prompt: string;
-  train_quality?: number;
-  val_quality?: number;
+/** One `candidates.jsonl` row; same shape as every rung's lineage. */
+export interface R1TriedCandidate extends CandidateRecord {
   patch?: R1Proposal["patch"];
 }
 
@@ -157,20 +148,6 @@ export function resolveR1Config(options: {
   return { rounds, candidates, passStreak, budget };
 }
 
-function llmTargetLine(config: LlmConfig): string {
-  return formatLlmTarget({ ...config, apiBase: normalizeLlmApiBase(config.apiBase) });
-}
-
-function studentEvalExtras(card: PromptCard, options: RunR1Options) {
-  const envDir = process.env.SYSPROMPT_IMAGE_DIR?.trim();
-  return {
-    fetch: options.fetch,
-    temperature: options.temperature,
-    max_tokens: options.maxTokens,
-    imageDir: options.imageDir ?? (envDir || card.source),
-  };
-}
-
 function rewriteSettings(prompt: string, options: RunR1Options) {
   const requested = options.rewriteMode ?? parseRewriteMode(process.env.SYSPROMPT_REWRITE_MODE);
   const effective = resolveEffectiveRewriteMode(requested, prompt, resolvePatchThreshold());
@@ -183,29 +160,18 @@ function rewriteSettings(prompt: string, options: RunR1Options) {
   };
 }
 
-function markPromoted(card: PromptCard, versionId: string): void {
-  for (const version of card.versions) {
-    version.promoted = version.id === versionId;
-  }
-  card.status = "promoted";
-}
+type R1RewriteSettings = ReturnType<typeof rewriteSettings>;
 
-function assertR1Ready(card: PromptCard): void {
-  if (!card.suite_id || card.status === "draft") {
-    throw new Error(
-      `Card "${card.id}" must be bound to a suite before run --rung R1. Run: sysprompt bind ${card.id} <suite.yaml>`,
-    );
-  }
-}
-
-function pushModel(card: PromptCard, model: string): void {
-  if (!card.models.some((item) => item.id === model)) {
-    card.models.push({ id: model, provider: "openai-compatible", name: model });
-  }
-}
-
-function collectScores(evalResult: SplitEval, versionId: string, modelId: string, metricId: string): Score[] {
-  return [...evalResult.scores, aggregateScore(evalResult, versionId, modelId, metricId)];
+function sectionsArtifact(settings: R1RewriteSettings, sourcePrompt: string) {
+  return sectionMapArtifact({
+    sections: settings.sections,
+    rewriteMode: settings.requested,
+    effectiveMode: settings.effective,
+    maxPatchRatio: settings.maxPatchRatio,
+    allowFullRewrite: settings.allowFullRewrite,
+    usedFallback: false,
+    sourceChars: sourcePrompt.length,
+  });
 }
 
 function buildSummary(input: {
@@ -213,7 +179,7 @@ function buildSummary(input: {
   cardId: string;
   config: R1LoopConfig;
   roundsRan: number;
-  tried: R1TriedCandidate[];
+  tried: CandidateRecord[];
   adoptedCount: number;
   passStreak: number;
   promoted: boolean;
@@ -247,7 +213,7 @@ function buildSummary(input: {
 export async function runR1(cardRef: string, options: RunR1Options = {}): Promise<RunR1Result> {
   const ws = openWorkspace(options.root);
   const card = loadCard(ws, cardRef);
-  assertR1Ready(card);
+  assertBound(card, "R1");
   const config = resolveR1Config(options);
   const baseline = baselineVersion(card);
   const suite = loadSuite(ws, card.suite_id!);
@@ -269,6 +235,67 @@ export async function runR1(cardRef: string, options: RunR1Options = {}): Promis
   }
 
   return runEvalLoop(ws, card, baseline, suite, config, llm, llmTarget, hasVal, options);
+}
+
+/** Write r1.diff / candidates / sections / summary and build the result. Shared by every R1 path. */
+function finishR1(input: {
+  session: RunSession;
+  baseline: PromptVersion;
+  best: PromptVersion;
+  settings: R1RewriteSettings;
+  config: R1LoopConfig;
+  dryRun: boolean;
+  llmTarget?: string;
+  roundsRan: number;
+  adoptedCount: number;
+  passStreak: number;
+  promoted: boolean;
+  message: string;
+  stopReason: string;
+  table?: string;
+  scores?: Score[];
+}): RunR1Result {
+  const { session } = input;
+  const written = session.write(input.baseline, input.best, {
+    diffName: "r1.diff",
+    scores: input.scores,
+    candidatesJsonl: session.records,
+    sections: sectionsArtifact(input.settings, input.baseline.system_prompt),
+    summary: buildSummary({
+      runId: session.run.id,
+      cardId: session.card.id,
+      config: input.config,
+      roundsRan: input.roundsRan,
+      tried: session.records,
+      adoptedCount: input.adoptedCount,
+      passStreak: input.passStreak,
+      promoted: input.promoted,
+      message: input.message,
+      table: input.table,
+      stopReason: input.stopReason,
+    }),
+  });
+  return {
+    card: session.card,
+    run: session.run,
+    candidates: session.candidates,
+    version: input.best,
+    diffPath: written.diffPath!,
+    scoresPath: written.scoresPath,
+    candidatesJsonlPath: written.candidatesJsonlPath,
+    summaryPath: written.summaryPath,
+    scores: input.scores ?? [],
+    promoted: input.promoted,
+    dryRun: input.dryRun,
+    table: input.table,
+    message: input.message,
+    llmTarget: input.llmTarget,
+    roundsRan: input.roundsRan,
+    adoptedCount: input.adoptedCount,
+    config: input.config,
+    rewriteMode: input.settings.effective,
+    sectionsPath: written.sectionsPath,
+  };
 }
 
 async function runNoEvalR1(
@@ -310,101 +337,36 @@ async function runNoEvalR1(
     config.candidates,
   );
 
-  const run: Run = {
-    id: newId("run"),
-    card_id: card.id,
-    rung: "R1",
-    status: "completed",
-    budget: config.budget,
-  };
-  const candidates: Candidate[] = [];
-  const tried: R1TriedCandidate[] = [];
-  let lastVersion = baseline;
-  card.rung = "R1";
-  card.status = "optimizing";
+  const session = new RunSession(ws, card, "R1", config.budget);
   pushModel(card, llm.model);
-
+  let best = baseline;
   for (const proposal of proposals) {
-    const version: PromptVersion = {
-      id: newId("ver"),
-      system_prompt: proposal.prompt,
-      hypothesis: proposal.hypothesis,
-      is_baseline: false,
-      promoted: false,
-      parent: baseline.id,
-    };
-    const candidate: Candidate = {
-      id: newId("cand"),
-      round: 1,
-      pass_streak: 0,
-      status: "rewritten",
-      version_id: version.id,
-    };
-    card.versions.push(version);
-    candidates.push(candidate);
-    tried.push({
-      id: candidate.id,
-      round: 1,
-      pass_streak: 0,
-      status: "rewritten",
-      version_id: version.id,
-      hypothesis: proposal.hypothesis,
+    best = session.addCandidate({
       prompt: proposal.prompt,
+      hypothesis: proposal.hypothesis,
+      parent: baseline,
+      round: 1,
+      status: "rewritten",
       patch: proposal.patch,
-    });
-    lastVersion = version;
+    }).version;
   }
-  writeCard(ws, card);
+  session.saveCard();
 
-  const best = lastVersion.id === baseline.id ? baseline : lastVersion;
-  const diff = unifiedPromptDiff(baseline.system_prompt, best.system_prompt);
-  const message = "Rewrite only (--no-eval); skipped eval loop and auto-promote.";
-  const written = writeRun(ws, run, candidates, {
-    diff,
-    diffName: "r1.diff",
-    candidatesJsonl: tried,
-    sections: sectionMapArtifact({
-      sections: settings.sections,
-      rewriteMode: settings.requested,
-      effectiveMode: settings.effective,
-      maxPatchRatio: settings.maxPatchRatio,
-      allowFullRewrite: settings.allowFullRewrite,
-      usedFallback: false,
-      sourceChars: baseline.system_prompt.length,
-    }),
-    summary: buildSummary({
-      runId: run.id,
-      cardId: card.id,
-      config,
-      roundsRan: proposals.length > 0 ? 1 : 0,
-      tried,
-      adoptedCount: 0,
-      passStreak: 0,
-      promoted: false,
-      message,
-      stopReason: "no-eval",
-    }),
-  });
-
-  return {
-    card,
-    run,
-    candidates,
-    version: best,
-    diffPath: written.diffPath!,
-    candidatesJsonlPath: written.candidatesJsonlPath,
-    summaryPath: written.summaryPath,
-    scores: [],
-    promoted: false,
+  return finishR1({
+    session,
+    baseline,
+    best,
+    settings,
+    config,
     dryRun: false,
-    message,
     llmTarget,
     roundsRan: proposals.length > 0 ? 1 : 0,
     adoptedCount: 0,
-    config,
-    rewriteMode: settings.effective,
-    sectionsPath: written.sectionsPath,
-  };
+    passStreak: 0,
+    promoted: false,
+    message: "Rewrite only (--no-eval); skipped eval loop and auto-promote.",
+    stopReason: "no-eval",
+  });
 }
 
 function runDryR1(
@@ -414,22 +376,11 @@ function runDryR1(
   config: R1LoopConfig,
   options: RunR1Options,
 ): RunR1Result {
-  const run: Run = {
-    id: newId("run"),
-    card_id: card.id,
-    rung: "R1",
-    status: "completed",
-    budget: config.budget,
-  };
-  const candidates: Candidate[] = [];
-  const tried: R1TriedCandidate[] = [];
+  const session = new RunSession(ws, card, "R1", config.budget);
   let lastVersion = baseline;
-  card.rung = "R1";
-  card.status = "optimizing";
-
   const rounds = Math.min(config.rounds, Math.ceil(config.budget / config.candidates) || 1);
   for (let round = 1; round <= rounds; round += 1) {
-    const remaining = config.budget - tried.length;
+    const remaining = config.budget - session.records.length;
     if (remaining <= 0) {
       break;
     }
@@ -439,145 +390,83 @@ function runDryR1(
       round,
     );
     for (const proposal of proposals) {
-      const version: PromptVersion = {
-        id: newId("ver"),
-        system_prompt: proposal.prompt,
-        hypothesis: proposal.hypothesis,
-        is_baseline: false,
-        promoted: false,
-        parent: lastVersion.id,
-      };
-      const candidate: Candidate = {
-        id: newId("cand"),
-        round,
-        pass_streak: 0,
-        status: "stub",
-        version_id: version.id,
-      };
-      card.versions.push(version);
-      candidates.push(candidate);
-      tried.push({
-        id: candidate.id,
-        round,
-        pass_streak: 0,
-        status: "stub",
-        version_id: version.id,
-        hypothesis: proposal.hypothesis,
+      lastVersion = session.addCandidate({
         prompt: proposal.prompt,
+        hypothesis: proposal.hypothesis,
+        parent: lastVersion,
+        round,
+        status: "stub",
         patch: proposal.patch,
-      });
-      lastVersion = version;
+      }).version;
     }
   }
-  writeCard(ws, card);
+  session.saveCard();
 
-  const best = lastVersion.id === baseline.id ? baseline : lastVersion;
-  const diff = unifiedPromptDiff(baseline.system_prompt, best.system_prompt);
-  const llm = readLlmConfig();
-  const message = "R1 dry-run stub (fake candidates, no LLM calls).";
-  const settings = rewriteSettings(baseline.system_prompt, options);
-  const written = writeRun(ws, run, candidates, {
-    diff,
-    diffName: "r1.diff",
-    candidatesJsonl: tried,
-    sections: sectionMapArtifact({
-      sections: settings.sections,
-      rewriteMode: settings.requested,
-      effectiveMode: settings.effective,
-      maxPatchRatio: settings.maxPatchRatio,
-      allowFullRewrite: settings.allowFullRewrite,
-      usedFallback: false,
-      sourceChars: baseline.system_prompt.length,
-    }),
-    summary: buildSummary({
-      runId: run.id,
-      cardId: card.id,
-      config,
-      roundsRan: rounds,
-      tried,
-      adoptedCount: 0,
-      passStreak: 0,
-      promoted: false,
-      message,
-      stopReason: "dry-run",
-    }),
-  });
-
-  return {
-    card,
-    run,
-    candidates,
-    version: best,
-    diffPath: written.diffPath!,
-    candidatesJsonlPath: written.candidatesJsonlPath,
-    summaryPath: written.summaryPath,
-    scores: [],
-    promoted: false,
+  return finishR1({
+    session,
+    baseline,
+    best: lastVersion,
+    settings: rewriteSettings(baseline.system_prompt, options),
+    config,
     dryRun: true,
-    message,
-    llmTarget: llm ? llmTargetLine(llm) : undefined,
+    llmTarget: optionalLlmTarget(),
     roundsRan: rounds,
     adoptedCount: 0,
-    config,
-    rewriteMode: settings.effective,
-    sectionsPath: written.sectionsPath,
-  };
+    passStreak: 0,
+    promoted: false,
+    message: "R1 dry-run stub (fake candidates, no LLM calls).",
+    stopReason: "dry-run",
+  });
+}
+
+interface RoundCandidate {
+  item: AddedCandidate;
+  proposal: R1Proposal;
+  train: SplitEval;
+  val?: SplitEval;
+}
+
+/** Best of a round by the adopt rule (val first, train as a val-tie break). */
+function bestOfRound(round: RoundCandidate[], hasVal: boolean): RoundCandidate {
+  let best = round[0]!;
+  for (const item of round.slice(1)) {
+    const better = adoptDecision({
+      hasVal,
+      currentVal: best.val?.meanQuality,
+      candidateVal: item.val?.meanQuality,
+      currentTrain: best.train.meanQuality,
+      candidateTrain: item.train.meanQuality,
+    });
+    if (better.adopt) {
+      best = item;
+    }
+  }
+  return best;
 }
 
 async function runEvalLoop(
   ws: Workspace,
   card: PromptCard,
   baseline: PromptVersion,
-  suite: ReturnType<typeof loadSuite>,
+  suite: EvalSuite,
   config: R1LoopConfig,
   llm: LlmConfig,
   llmTarget: string,
   hasVal: boolean,
   options: RunR1Options,
 ): Promise<RunR1Result> {
-  const run: Run = {
-    id: newId("run"),
-    card_id: card.id,
-    rung: "R1",
-    status: "completed",
-    budget: config.budget,
-  };
-  card.rung = "R1";
-  card.status = "optimizing";
+  const session = new RunSession(ws, card, "R1", config.budget);
   pushModel(card, llm.model);
-  writeCard(ws, card);
+  session.saveCard();
 
-  const scores: Score[] = [];
-  const candidates: Candidate[] = [];
-  const tried: R1TriedCandidate[] = [];
+  const student = new StudentEval(session, llm, suite, options);
   const seenPrompts = new Set<string>([promptKey(baseline.system_prompt)]);
   const history: SearchHistoryEntry[] = [];
   const hypotheses: string[] = [];
-  const fetch = options.fetch;
   const seedSettings = rewriteSettings(baseline.system_prompt, options);
-  const extras = studentEvalExtras(card, options);
 
-  const baselineTrain = await evaluatePrompt({
-    config: llm,
-    systemPrompt: baseline.system_prompt,
-    versionId: baseline.id,
-    suite,
-    split: "train",
-    ...extras,
-  });
-  scores.push(...collectScores(baselineTrain, baseline.id, llm.model, suite.metric.id));
-  let baselineVal: SplitEval | undefined;
-  if (hasVal) {
-    baselineVal = await evaluatePrompt({
-      config: llm,
-      systemPrompt: baseline.system_prompt,
-      versionId: baseline.id,
-      suite,
-      split: "val",
-      ...extras,
-    });
-    scores.push(...collectScores(baselineVal, baseline.id, llm.model, suite.metric.id));
-  }
+  const baselineTrain = await student.evaluate(baseline, "train");
+  const baselineVal = hasVal ? await student.evaluate(baseline, "val") : undefined;
 
   let currentVersion = baseline;
   let currentTrain = baselineTrain;
@@ -613,7 +502,7 @@ async function runEvalLoop(
 
     const raw = await proposeR1Candidates(llm, evidence, {
       tools: card.tools,
-      fetch,
+      fetch: options.fetch,
       currentPrompt: currentVersion.system_prompt,
       rewriteMode: settings.effective,
       maxPatchRatio: settings.maxPatchRatio,
@@ -627,91 +516,30 @@ async function runEvalLoop(
     }
 
     roundsRan = round;
-    const roundTried: Array<{
-      proposal: R1Proposal;
-      version: PromptVersion;
-      candidate: Candidate;
-      train: SplitEval;
-      val?: SplitEval;
-      record: R1TriedCandidate;
-    }> = [];
-
+    const roundTried: RoundCandidate[] = [];
     for (const proposal of proposals) {
-      const version: PromptVersion = {
-        id: newId("ver"),
-        system_prompt: proposal.prompt,
+      const item = session.addCandidate({
+        prompt: proposal.prompt,
         hypothesis: proposal.hypothesis,
-        is_baseline: false,
-        promoted: false,
-        parent: currentVersion.id,
-      };
-      const candidate: Candidate = {
-        id: newId("cand"),
+        parent: currentVersion,
         round,
-        pass_streak: passStreak,
         status: "evaluated",
-        version_id: version.id,
-        parent_candidate_id: currentCandidateId,
-      };
-      card.versions.push(version);
-      candidates.push(candidate);
+        passStreak,
+        parentCandidateId: currentCandidateId,
+        patch: proposal.patch,
+      });
       seenPrompts.add(promptKey(proposal.prompt));
       hypotheses.push(proposal.hypothesis);
 
-      const train = await evaluatePrompt({
-        config: llm,
-        systemPrompt: proposal.prompt,
-        versionId: version.id,
-        suite,
-        split: "train",
-        ...extras,
-      });
+      const train = await student.evaluate(item.version, "train");
       evalsUsed += 1;
-      scores.push(...collectScores(train, version.id, llm.model, suite.metric.id));
-      let val: SplitEval | undefined;
-      if (hasVal) {
-        val = await evaluatePrompt({
-          config: llm,
-          systemPrompt: proposal.prompt,
-          versionId: version.id,
-          suite,
-          split: "val",
-          ...extras,
-        });
-        scores.push(...collectScores(val, version.id, llm.model, suite.metric.id));
-      }
-
-      const record: R1TriedCandidate = {
-        id: candidate.id,
-        round,
-        pass_streak: passStreak,
-        status: "evaluated",
-        version_id: version.id,
-        parent_candidate_id: candidate.parent_candidate_id,
-        hypothesis: proposal.hypothesis,
-        prompt: proposal.prompt,
-        train_quality: train.meanQuality,
-        val_quality: val?.meanQuality,
-        patch: proposal.patch,
-      };
-      tried.push(record);
-      roundTried.push({ proposal, version, candidate, train, val, record });
+      const val = hasVal ? await student.evaluate(item.version, "val") : undefined;
+      item.record.train_quality = train.meanQuality;
+      item.record.val_quality = val?.meanQuality;
+      roundTried.push({ item, proposal, train, val });
     }
 
-    let best = roundTried[0]!;
-    for (const item of roundTried.slice(1)) {
-      const better = adoptDecision({
-        hasVal,
-        currentVal: best.val?.meanQuality,
-        candidateVal: item.val?.meanQuality,
-        currentTrain: best.train.meanQuality,
-        candidateTrain: item.train.meanQuality,
-      });
-      if (better.adopt) {
-        best = item;
-      }
-    }
-
+    const best = bestOfRound(roundTried, hasVal);
     const vsCurrent = adoptDecision({
       hasVal,
       currentVal: currentVal?.meanQuality,
@@ -719,49 +547,37 @@ async function runEvalLoop(
       currentTrain: currentTrain.meanQuality,
       candidateTrain: best.train.meanQuality,
     });
+    history.push({
+      round,
+      hypothesis: best.proposal.hypothesis,
+      train: best.train.meanQuality,
+      val: best.val?.meanQuality,
+      adopted: vsCurrent.adopt,
+    });
 
     if (vsCurrent.adopt) {
-      currentVersion = best.version;
+      currentVersion = best.item.version;
       currentTrain = best.train;
       currentVal = best.val;
-      currentCandidateId = best.candidate.id;
+      currentCandidateId = best.item.candidate.id;
       passStreak += 1;
       adoptedCount += 1;
-      best.candidate.status = "adopted";
-      best.candidate.pass_streak = passStreak;
-      best.record.status = "adopted";
-      best.record.pass_streak = passStreak;
-      for (const item of roundTried) {
-        if (item !== best) {
-          item.candidate.status = "rejected";
-          item.record.status = "rejected";
+      session.setStatus(best.item, "adopted", passStreak);
+      for (const other of roundTried) {
+        if (other !== best) {
+          session.setStatus(other.item, "rejected");
         }
       }
-      history.push({
-        round,
-        hypothesis: best.proposal.hypothesis,
-        train: best.train.meanQuality,
-        val: best.val?.meanQuality,
-        adopted: true,
-      });
-      writeCard(ws, card);
+      session.saveCard();
       if (passStreak >= config.passStreak) {
         stopReason = "pass-streak";
         break;
       }
     } else {
       passStreak = 0;
-      for (const item of roundTried) {
-        item.candidate.status = "rejected";
-        item.record.status = "rejected";
+      for (const other of roundTried) {
+        session.setStatus(other.item, "rejected");
       }
-      history.push({
-        round,
-        hypothesis: best.proposal.hypothesis,
-        train: best.train.meanQuality,
-        val: best.val?.meanQuality,
-        adopted: false,
-      });
     }
   }
 
@@ -772,90 +588,37 @@ async function runEvalLoop(
     originalTrain: baselineTrain.meanQuality,
     finalTrain: currentTrain.meanQuality,
   });
-
-  if (decision.promote && currentVersion.id !== baseline.id) {
-    markPromoted(card, currentVersion.id);
-    const adopted = candidates.find((item) => item.version_id === currentVersion.id);
-    if (adopted) {
-      adopted.status = "promoted";
+  const promoted = decision.promote && currentVersion.id !== baseline.id;
+  session.settle(promoted, currentVersion.id);
+  if (promoted) {
+    const index = session.candidates.findIndex((item) => item.version_id === currentVersion.id);
+    if (index >= 0) {
+      session.candidates[index]!.status = "promoted";
+      session.records[index]!.status = "promoted";
     }
-    const record = tried.find((item) => item.version_id === currentVersion.id);
-    if (record) {
-      record.status = "promoted";
-    }
-  } else {
-    card.status = "verifying";
   }
-  writeCard(ws, card);
+  session.saveCard();
 
-  const rows: ScoreRow[] = [
-    {
-      split: "train",
-      baselineQuality: baselineTrain.meanQuality,
-      candidateQuality: currentTrain.meanQuality,
-      baselineLatency: baselineTrain.scores.length === 0 ? undefined : baselineTrain.meanLatency,
-      candidateLatency: currentTrain.scores.length === 0 ? undefined : currentTrain.meanLatency,
-    },
-  ];
+  const rows: ScoreRow[] = [scoreRow("train", baselineTrain, currentTrain)];
   if (hasVal && baselineVal && currentVal) {
-    rows.push({
-      split: "val",
-      baselineQuality: baselineVal.meanQuality,
-      candidateQuality: currentVal.meanQuality,
-      baselineLatency: baselineVal.scores.length === 0 ? undefined : baselineVal.meanLatency,
-      candidateLatency: currentVal.scores.length === 0 ? undefined : currentVal.meanLatency,
-    });
+    rows.push(scoreRow("val", baselineVal, currentVal));
   }
-  const table = formatScoreTable(rows);
-  const diff = unifiedPromptDiff(baseline.system_prompt, currentVersion.system_prompt);
-  const written = writeRun(ws, run, candidates, {
-    diff,
-    diffName: "r1.diff",
-    scores,
-    candidatesJsonl: tried,
-    sections: sectionMapArtifact({
-      sections: seedSettings.sections,
-      rewriteMode: seedSettings.requested,
-      effectiveMode: seedSettings.effective,
-      maxPatchRatio: seedSettings.maxPatchRatio,
-      allowFullRewrite: seedSettings.allowFullRewrite,
-      usedFallback: false,
-      sourceChars: baseline.system_prompt.length,
-    }),
-    summary: buildSummary({
-      runId: run.id,
-      cardId: card.id,
-      config,
-      roundsRan,
-      tried,
-      adoptedCount,
-      passStreak,
-      promoted: decision.promote && currentVersion.id !== baseline.id,
-      message: decision.message,
-      table,
-      stopReason,
-    }),
-  });
 
-  return {
-    card,
-    run,
-    candidates,
-    version: currentVersion,
-    diffPath: written.diffPath!,
-    scoresPath: written.scoresPath,
-    candidatesJsonlPath: written.candidatesJsonlPath,
-    summaryPath: written.summaryPath,
-    scores,
-    promoted: decision.promote && currentVersion.id !== baseline.id,
+  return finishR1({
+    session,
+    baseline,
+    best: currentVersion,
+    settings: seedSettings,
+    config,
     dryRun: false,
-    table,
-    message: decision.message,
     llmTarget,
     roundsRan,
     adoptedCount,
-    config,
-    rewriteMode: seedSettings.effective,
-    sectionsPath: written.sectionsPath,
-  };
+    passStreak,
+    promoted,
+    message: decision.message,
+    stopReason,
+    table: formatScoreTable(rows),
+    scores: session.scores,
+  });
 }
